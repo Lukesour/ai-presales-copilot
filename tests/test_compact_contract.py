@@ -1,6 +1,6 @@
 import pytest
 
-from ai_presales_lab.compact_contract import (
+from ai_presales_copilot.compact_contract import (
     compact_target_from_payload,
     merge_compact_solution,
     validate_compact_solution_dict,

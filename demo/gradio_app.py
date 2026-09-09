@@ -6,12 +6,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ai_presales_lab.agent import PresalesAgent
-from ai_presales_lab.dify_client import DifyClient, DifyClientError
-from ai_presales_lab.evaluation import load_cases
-from ai_presales_lab.knowledge import KnowledgeBase
-from ai_presales_lab.offline_engine import OfflineSolutionEngine
-from ai_presales_lab.persistence import CheckpointStore
+from ai_presales_copilot.agent import PresalesAgent
+from ai_presales_copilot.dify_client import DifyClient, DifyClientError
+from ai_presales_copilot.evaluation import load_cases
+from ai_presales_copilot.knowledge import KnowledgeBase
+from ai_presales_copilot.offline_engine import OfflineSolutionEngine
+from ai_presales_copilot.persistence import CheckpointStore
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -102,8 +102,8 @@ def build_app(mode: str):
         except (ValueError, RuntimeError) as exc:
             return f"### 审核失败\n`{exc}`", {"error": str(exc)}
 
-    with gr.Blocks(title="AI Presales Lab") as app:
-        gr.Markdown("# AI 产品售前方案助手\n选择一个合成客户案例，查看方案、风险和证据。")
+    with gr.Blocks(title="AI Presales Copilot") as app:
+        gr.Markdown("# AI Presales Copilot\n把客户需求转成可审计的技术方案、POC 和模型部署建议。")
         case_id = gr.Dropdown(choices=list(cases), value="case-001", label="客户案例")
         run = gr.Button("生成方案", variant="primary")
         with gr.Row():

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ai_presales_lab.finetuning import load_conversations
+from ai_presales_copilot.finetuning import load_conversations
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"

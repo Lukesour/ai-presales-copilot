@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from ai_presales_lab.agent import PresalesAgent
-from ai_presales_lab.api import AgentHTTPService
-from ai_presales_lab.knowledge import KnowledgeBase
-from ai_presales_lab.persistence import CheckpointStore
-from ai_presales_lab.schemas import CustomerBrief
-from ai_presales_lab.security import PolicyResult
+from ai_presales_copilot.agent import PresalesAgent
+from ai_presales_copilot.api import AgentHTTPService
+from ai_presales_copilot.knowledge import KnowledgeBase
+from ai_presales_copilot.persistence import CheckpointStore
+from ai_presales_copilot.schemas import CustomerBrief
+from ai_presales_copilot.security import PolicyResult
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -126,7 +126,7 @@ def test_openai_compatible_service_returns_structured_content(knowledge_base: Kn
 
 def test_output_policy_failure_is_terminal(knowledge_base: KnowledgeBase, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "ai_presales_lab.agent.inspect_output",
+        "ai_presales_copilot.agent.inspect_output",
         lambda _text: PolicyResult(True, ["unsupported_commitment"], ["synthetic-match"]),
     )
     with CheckpointStore(":memory:") as store:

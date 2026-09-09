@@ -8,10 +8,10 @@ import json
 import sys
 from pathlib import Path
 
-from ai_presales_lab.agent import PresalesAgent
-from ai_presales_lab.evaluation import load_cases
-from ai_presales_lab.knowledge import KnowledgeBase
-from ai_presales_lab.persistence import CheckpointStore
+from ai_presales_copilot.agent import PresalesAgent
+from ai_presales_copilot.evaluation import load_cases
+from ai_presales_copilot.knowledge import KnowledgeBase
+from ai_presales_copilot.persistence import CheckpointStore
 
 ROOT = Path(__file__).resolve().parents[1]
 

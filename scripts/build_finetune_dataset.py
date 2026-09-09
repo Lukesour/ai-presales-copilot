@@ -10,17 +10,17 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from ai_presales_lab.agent import PresalesAgent
-from ai_presales_lab.compact_contract import (
+from ai_presales_copilot.agent import PresalesAgent
+from ai_presales_copilot.compact_contract import (
     COMPACT_SYSTEM_PROMPT,
     compact_target_from_payload,
     validate_compact_solution_dict,
 )
-from ai_presales_lab.evaluation import load_cases
-from ai_presales_lab.finetuning import dataset_stats, validate_conversation, write_manifest
-from ai_presales_lab.knowledge import KnowledgeBase
-from ai_presales_lab.persistence import CheckpointStore
-from ai_presales_lab.schemas import validate_solution_dict
+from ai_presales_copilot.evaluation import load_cases
+from ai_presales_copilot.finetuning import dataset_stats, validate_conversation, write_manifest
+from ai_presales_copilot.knowledge import KnowledgeBase
+from ai_presales_copilot.persistence import CheckpointStore
+from ai_presales_copilot.schemas import validate_solution_dict
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_PROMPT = (

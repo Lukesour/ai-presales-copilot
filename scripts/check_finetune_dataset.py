@@ -7,9 +7,9 @@ import argparse
 import json
 from pathlib import Path
 
-from ai_presales_lab.compact_contract import validate_compact_solution_dict
-from ai_presales_lab.finetuning import dataset_stats, load_conversations, sha256_file
-from ai_presales_lab.schemas import validate_solution_dict
+from ai_presales_copilot.compact_contract import validate_compact_solution_dict
+from ai_presales_copilot.finetuning import dataset_stats, load_conversations, sha256_file
+from ai_presales_copilot.schemas import validate_solution_dict
 
 ROOT = Path(__file__).resolve().parents[1]
 

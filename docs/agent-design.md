@@ -52,7 +52,7 @@ PYTHONPATH=src python scripts/run_agent.py --case-id case-001 --approve --db .ru
 
 ## LangGraph 适配边界
 
-`src/ai_presales_lab/langgraph_adapter.py` 提供可选的线性 StateGraph 适配器；核心 CI 不强制安装 LangGraph，因此在无网络、无额外依赖的情况下仍可运行。若部署到生产，建议将 `risk_gate` 包装为 LangGraph `interrupt()`，使用持久化 checkpointer，以便通过 `Command(resume=...)` 恢复人工决策。
+`src/ai_presales_copilot/langgraph_adapter.py` 提供可选的线性 StateGraph 适配器；核心 CI 不强制安装 LangGraph，因此在无网络、无额外依赖的情况下仍可运行。若部署到生产，建议将 `risk_gate` 包装为 LangGraph `interrupt()`，使用持久化 checkpointer，以便通过 `Command(resume=...)` 恢复人工决策。
 
 本项目没有把“安装了 LangGraph”当成能力证明：面试时应展示节点边界、状态契约、审核恢复、工具权限和评测证据。
 

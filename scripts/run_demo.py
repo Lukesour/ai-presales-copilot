@@ -8,10 +8,10 @@ import json
 import sys
 from pathlib import Path
 
-from ai_presales_lab.dify_client import DifyClient, DifyClientError
-from ai_presales_lab.evaluation import load_cases
-from ai_presales_lab.knowledge import KnowledgeBase
-from ai_presales_lab.offline_engine import OfflineSolutionEngine
+from ai_presales_copilot.dify_client import DifyClient, DifyClientError
+from ai_presales_copilot.evaluation import load_cases
+from ai_presales_copilot.knowledge import KnowledgeBase
+from ai_presales_copilot.offline_engine import OfflineSolutionEngine
 
 ROOT = Path(__file__).resolve().parents[1]
 

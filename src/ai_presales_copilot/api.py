@@ -18,7 +18,7 @@ from .schemas import CustomerBrief
 class AgentHTTPHandler(BaseHTTPRequestHandler):
     """Expose health, run, checkpoint, and human-review endpoints."""
 
-    server_version = "ai-presales-lab/0.2"
+    server_version = "ai-presales-copilot/0.2"
     max_body_bytes = 1_000_000
 
     @property

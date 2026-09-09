@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ai-presales-lab"
+name = "ai-presales-copilot"
 version = "0.2.0"
-description = "A reproducible enterprise AI presales portfolio with Agent, RAG POC, QLoRA and model serving evaluation."
+description = "An evidence-aware AI presales copilot for auditable solution design and POC planning."
 requires-python = ">=3.11"
 dependencies = []
 
@@ -41,3 +41,4 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["notebooks"]

@@ -18,7 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from ai_presales_lab.llama_client import LlamaClient, LlamaClientError
+from ai_presales_copilot.llama_client import LlamaClient, LlamaClientError
 
 ROOT = Path(__file__).resolve().parents[1]
 

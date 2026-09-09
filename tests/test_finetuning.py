@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_presales_lab.finetuning import dataset_stats, load_conversations, validate_conversation
+from ai_presales_copilot.finetuning import dataset_stats, load_conversations, validate_conversation
 
 ROOT = Path(__file__).resolve().parents[1]
 

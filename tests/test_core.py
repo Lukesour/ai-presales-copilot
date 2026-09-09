@@ -3,13 +3,17 @@ from typing import Self
 
 import pytest
 
-from ai_presales_lab.dify_client import DifyClient, DifyClientError
-from ai_presales_lab.knowledge import KnowledgeBase
-from ai_presales_lab.llama_client import LlamaClient
-from ai_presales_lab.observability import redact
-from ai_presales_lab.offline_engine import OfflineSolutionEngine
-from ai_presales_lab.schemas import CustomerBrief, validate_solution_dict
-from ai_presales_lab.security import inspect_output, inspect_sensitive_data, inspect_untrusted_input
+from ai_presales_copilot.dify_client import DifyClient, DifyClientError
+from ai_presales_copilot.knowledge import KnowledgeBase
+from ai_presales_copilot.llama_client import LlamaClient
+from ai_presales_copilot.observability import redact
+from ai_presales_copilot.offline_engine import OfflineSolutionEngine
+from ai_presales_copilot.schemas import CustomerBrief, validate_solution_dict
+from ai_presales_copilot.security import (
+    inspect_output,
+    inspect_sensitive_data,
+    inspect_untrusted_input,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 

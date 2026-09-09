@@ -7,7 +7,11 @@ import argparse
 import json
 from pathlib import Path
 
-from ai_presales_lab.security import inspect_output, inspect_sensitive_data, inspect_untrusted_input
+from ai_presales_copilot.security import (
+    inspect_output,
+    inspect_sensitive_data,
+    inspect_untrusted_input,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 

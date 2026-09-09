@@ -7,9 +7,9 @@ import argparse
 import json
 from pathlib import Path
 
-from ai_presales_lab.agent_evaluation import evaluate_agent_cases
-from ai_presales_lab.evaluation import load_cases
-from ai_presales_lab.knowledge import KnowledgeBase
+from ai_presales_copilot.agent_evaluation import evaluate_agent_cases
+from ai_presales_copilot.evaluation import load_cases
+from ai_presales_copilot.knowledge import KnowledgeBase
 
 ROOT = Path(__file__).resolve().parents[1]
 
