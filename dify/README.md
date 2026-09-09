@@ -14,7 +14,7 @@
 Dify 应用层不要放进 Colab：它需要数据库、向量库、插件守护进程和持久化文件存储；Colab 只负责一次性的 llama.cpp 性能实验。当前本机已按官方 Docker Compose 配置准备运行时文件到被忽略的 `.runtime/dify/docker/`，端口使用 8081：
 
 ```bash
-cd /Users/suan/Desktop/求职/解决方案/ai-presales-lab
+cd /Users/suan/Desktop/求职/解决方案/ai-presales-copilot
 COMPOSE_PROFILES=weaviate,postgresql,collaboration \
 docker compose -p ai-presales-dify \
   -f .runtime/dify/docker/docker-compose.yaml \

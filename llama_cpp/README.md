@@ -24,7 +24,7 @@ cmake --build build --config Release -t llama-server llama-cli
 把 `LLAMA_SERVER_BIN` 指向 `build/bin/llama-server`。模型可以使用官方支持的 Hugging Face GGUF 仓库，建议先选小模型验证流程：
 
 ```bash
-cd ai-presales-lab
+cd ai-presales-copilot
 LLAMA_CLI_BIN=/path/to/llama-cli ./scripts/download_model.sh
 ```
 
