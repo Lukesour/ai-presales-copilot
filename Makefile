@@ -1,13 +1,28 @@
 PYTHON ?= python3
 PYTHONPATH := src
 
-.PHONY: test lint demo eval agent-eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check
+.PHONY: test lint demo eval agent-eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check schema-export ingest self-qa lock-check compose-config
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest -q
 
 lint:
-	$(PYTHON) -m ruff check src scripts tests
+	$(PYTHON) -m ruff check src scripts tests demo/gradio_app.py
+
+lock-check:
+	$(PYTHON) -m uv lock --check
+
+schema-export:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/export_schemas.py
+
+ingest:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/ingest_sources.py
+
+self-qa:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/build_self_qa.py --input data/finetuning/train.jsonl
+
+compose-config:
+	docker compose -f deploy/compose.agent.yaml config
 
 demo:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_demo.py --case-id case-001

@@ -9,7 +9,10 @@
 | Sensitive data leakage | 手机号、身份证号、邮箱进入输出或 trace | 输出敏感信息扫描、trace 脱敏 |
 | Excessive agency | 模型自行发邮件、改生产配置、执行命令 | 工具白名单；当前工具全部只读/确定性 |
 | Retrieval poisoning | 恶意文档写入伪造产品事实 | 文档来源、版本、权限和人工发布流程 |
-| Data leakage | 密钥、客户文件或模型权重提交仓库 | `.env`/模型忽略、服务端密钥、提交前检查 |
+| Data leakage | 密钥、客户文件或模型权重提交仓库 | `.env`/模型忽略、服务端密钥、敏感字段扫描、提交前检查 |
+| Tenant/RBAC leakage | 用户读取其他租户/项目或 trace | FastAPI dev-token context、租户/项目过滤、reviewer/admin 分级 |
+| SSRF/resource abuse | 任意 URL 抓取、超大请求、无限重试 | 注册来源 + HTTPS/robots/私网解析拒绝、1 MB body、有限 repair |
+| Stale approval | 并发审核覆盖或重复 approve | checkpoint state_version 乐观锁 + Idempotency-Key |
 
 ## 当前自动化检查
 
@@ -20,7 +23,8 @@ PYTHONPATH=src python scripts/run_security_checks.py
 `security/redteam-cases.jsonl` 覆盖注入、无证据承诺、敏感数据和正常输入；最近一次 12/12 通过。Promptfoo 配置在 `security/promptfooconfig.yaml`，启动本地 API 后可用于扩展对抗回归：
 
 ```bash
-PYTHONPATH=src python scripts/serve_agent.py --port 8090
+PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
+  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
 promptfoo redteam run -c security/promptfooconfig.yaml
 ```
 
@@ -37,10 +41,10 @@ Trace 记录 run/trace/thread、节点、状态和错误，不记录 Authorizati
 - 将 trace 访问纳入审计和最小权限控制。
 - 对日志、评测集和训练集做脱敏与授权检查。
 
-## 上线前必须补齐
+## Phase 1 已实现 / 上线前仍需补齐
 
-- 身份认证、RBAC/ABAC、租户隔离和密钥轮换。
-- 文档 ACL 与检索过滤一致，用户无权访问的片段不得进入上下文。
+- Phase 1 使用显式开发 token；共享/生产环境必须接入 OIDC/JWT、RBAC/ABAC 和密钥轮换。
+- 文档 ACL 与检索过滤一致，用户无权访问的片段不得进入上下文；需要对接企业目录时再引入 OpenFGA。
 - 生产工具采用 allowlist、参数校验、审批和幂等键；高风险动作默认 human-in-the-loop。
 - 依赖、镜像、模型、adapter、数据和 prompt 的 SBOM/版本记录。
 - 供应商、模型许可、数据授权、留存和跨境边界由安全/法务确认。

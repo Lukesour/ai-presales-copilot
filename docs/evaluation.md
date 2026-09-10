@@ -28,7 +28,7 @@ make finetune-dry-run
 
 在本机依赖环境中，最近一次可复现结果为：
 
-- Python 单元测试：30 passed。
+- Python 单元测试：41 passed。
 - Agent 24 条案例：24/24 完成；schema、POC、model strategy、证据/保守无证据规则和审核门均通过。
 - 红队策略用例：12/12 通过。
 - 微调数据：72 条对话，按 24 个源案例做 case-level split；train 42、dev 12、test 18，每个源案例最多 3 个变体；输入包含结构化客户约束和检索上下文，target 为紧凑 JSON。

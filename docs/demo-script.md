@@ -20,7 +20,7 @@
 
 强调：系统不会在资料不足时直接承诺准确率、SLA 或生产容量。
 
-再次运行或打开 `case-001` 的 JSON，展示 `pending_review`；点击/命令行 approve，说明 checkpoint 会从人工审核点恢复，而不是重新生成一份不可比较的结果。
+再次运行或打开 `case-001` 的 JSON，展示 `waiting_for_review` / `error_code=needs_review`；点击/命令行 approve，说明 checkpoint 会从人工审核点恢复，而不是重新生成一份不可比较的结果。
 
 演示环境建议：本地 Q4 只展示 Dify → OpenAI-compatible llama.cpp 的接入链路和延迟；如果要展示稳定的中文方案质量，先在 Dify 中切换到试用 API，并保留同一知识库、提示词和测试问题。不要把 0.5B 本地模型的输出质量当成生产结论。
 

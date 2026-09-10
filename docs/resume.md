@@ -34,11 +34,11 @@
 
 **项目角色：独立完成方案设计、开发、评测与交付文档｜项目周期：`[20XX.XX–20XX.XX]`**
 
-**技术栈：** Python、Dify、LangGraph（可选适配）、RAG、结构化输出、SQLite、Docker、GitHub Actions、TRL/PEFT、QLoRA、LLaMA Factory、GGUF、llama.cpp、vLLM、OpenAI-compatible API、Promptfoo
+**技术栈：** Python、Pydantic v2、FastAPI、LangGraph、RAG、结构化输出、PostgreSQL/pgvector、SQLite、Docker Compose、GitHub Actions、TRL/PEFT、QLoRA、LLaMA Factory、GGUF、llama.cpp、vLLM、OpenAI-compatible API、Promptfoo
 
 - **需求分析与售前方案：** 围绕制造业设备运维场景，将行业、业务、数据、部署、峰值并发、时延、成本和合规约束结构化，形成需求澄清表、解决方案 Brief、架构说明、部署决策、TCO/容量估算和演示脚本，将“做一个 AI 助手”转化为可评审、可验证的交付方案。
 
-- **Agent 工作流设计：** 设计 `intake → retrieve → architect → poc → model_strategy → risk_gate → finalize` 七节点显式状态图，使用 4 个有边界的工具完成知识检索、证据校验、容量估算和部署方案对比；引入 SQLite checkpoint、人工 `approve/reject`、暂停后恢复、trace_id/run_id 和失败状态，覆盖从需求输入到方案交付的完整闭环。
+- **Agent 工作流设计：** 使用真实 LangGraph `StateGraph` 编排 `intake → clarify → query_rewrite → retrieve → draft → ground_claims → critic → repair → risk_gate → human_review → finalize` 十一节点流程；以 PostgreSQL/SQLite checkpoint、乐观锁、人工 `approve/reject`、暂停后恢复、trace_id/run_id 和失败状态覆盖从需求输入到方案交付的完整闭环，并将模型调用限制在结构化 JSON、有限重试和证据绑定边界内。
 
 - **RAG 与结构化交付：** 基于 Dify/Gradio 复现售前应用交付链路，定义 JSON Schema、证据引用、无证据保守回答、假设条件、风险项、POC 计划和模型策略等输出字段，并提供 OpenAI-compatible API，使同一套方案既能演示，也能被前端或其他系统集成。
 
@@ -52,7 +52,7 @@
 
 - **安全与治理：** 针对中文、英文和间接提示注入、越权承诺、过度代理、无限资源消耗、隐私信息和无依据回答设计 12 条 red-team cases，安全评测 `12/12` 通过；对输入、输出和敏感信息执行策略检查，对高风险、合规、证据不足和提示注入情形进入人工审核，并以 JSONL trace 记录可审计过程。
 
-- **工程化与交付：** 提供模块化 Python 包、单元测试、离线评测、Agent 评测、安全检查、数据集检查、Docker Compose 部署、健康检查/就绪检查、API 文档、架构图、技术选型、面试问答和演示脚本；当前验证结果为 `18 passed`、Ruff 检查通过、Docker Compose 配置通过、API 健康检查和 Chat Completions 集成测试通过。
+- **工程化与交付：** 提供模块化 Python 包、单元测试、离线评测、Agent 评测、安全检查、数据集检查、Docker Compose 部署、健康检查/就绪检查、API 文档、架构图、技术选型、面试问答和演示脚本；当前验证结果为 `41 passed`、Ruff 检查通过、锁文件校验通过、依赖安全扫描无已知漏洞、Docker Compose 配置通过。
 
 ## 3. 详细项目说明素材
 
@@ -93,7 +93,7 @@
 - `intake` 负责需求结构化、假设和澄清问题；`retrieve` 负责知识检索与证据校验；`architect` 输出方案架构；`poc` 输出验证计划；`model_strategy` 输出模型和部署建议；`risk_gate` 决定自动交付或人工审核；`finalize` 生成最终响应。
 - 工具调用采用有限集合和输入边界，工具返回结构化结果；不允许 Agent 任意执行 shell、网络写操作或不可审计的外部动作。
 - 每个 run 具有 `run_id`、`trace_id` 和 `thread_id`；checkpoint 保存状态，支持人工审核后恢复，拒绝则终止并记录原因。
-- 核心流程保持轻量、可测试；另提供 LangGraph 适配器，将相同状态和审核语义映射到 StateGraph/checkpointer/interrupt 模式。
+- 核心流程保持轻量、可测试；正式 v2 运行时直接使用 LangGraph StateGraph，节点边界写入 SQLite/PostgreSQL checkpoint，人工审核通过 API 事务恢复并进入 finalize；旧规则 Agent 仅作为历史 fixture。
 
 ### RAG 与证据策略
 
@@ -128,7 +128,7 @@
 | Agent 回归 | 24/24 完成；schema、POC、模型策略、证据有效性/保守分支、审核门均通过 | “Agent 回归 24/24 通过关键交付和风险门校验。” |
 | 安全回归 | 12 条 red-team cases，`12/12` 通过 | “覆盖注入、隐私、越权、无限消耗和无依据回答，安全回归 12/12 通过。” |
 | 数据集 | 72 条合成对话；train/dev/test 为 42/12/18；按源案例隔离；manifest/hash 有效 | “完成可追溯、按案例隔离的数据集构建和校验。” |
-| 工程验证 | `18 passed`；Ruff 通过；Docker Compose config 通过；API 集成验证通过 | “建立测试、静态检查、容器配置和 API 集成验证。” |
+| 工程验证 | `41 passed`；Ruff、锁文件和依赖安全扫描通过；Docker Compose config 通过 | “建立测试、静态检查、依赖审计和容器配置验证。” |
 | QLoRA | Colab Tesla T4 已完成 compact profile 训练；JSON parse `18/18`、schema `14/18`、policy `18/18`；完整响应仍由 Agent/RAG 组装 | “完成可复现 QLoRA 训练与 held-out 对比，并明确 compact contract 与完整业务响应的边界。” |
 
 ## 6. 不同简历长度版本
@@ -138,7 +138,7 @@
 **企业 AI 解决方案售前实验室｜独立项目｜`[时间]`**
 
 - 面向制造业设备运维场景，负责从需求澄清、知识检索、方案架构、POC 验收、模型选型到风险审核的端到端 AI 解决方案设计。
-- 设计 `intake/retrieve/architect/poc/model_strategy/risk_gate/finalize` 七节点 Agent，接入 4 个有边界工具、SQLite checkpoint、人工审核恢复、脱敏 trace 和 OpenAI-compatible API。
+- 设计 `intake/clarify/query_rewrite/retrieve/draft/ground_claims/critic/repair/risk_gate/human_review/finalize` 十一节点 Agent，接入严格 v2 契约、PostgreSQL/SQLite checkpoint、人工审核恢复、脱敏 trace 和 OpenAI-compatible API。
 - 基于 Dify/Gradio 搭建演示链路，将 POC 拆分为数据基线、RAG、Agent、业务验收四阶段，定义每阶段交付物和 Exit Criteria。
 - 构建 24 条黄金案例：schema 通过率 `24/24`、需求字段覆盖率 `100%`、19/24 返回有效证据、5/24 正确触发无证据保守防护；Agent 回归关键指标 `24/24` 通过。
 - 生成按源案例隔离的 72 条 ShareGPT-style 数据（train/dev/test=`42/12/18`），实现 TRL/PEFT QLoRA、LLaMA Factory 配置、manifest/hash、数据检查和评估脚本；在 Colab Tesla T4 完成 compact profile 训练与 held-out 对比，adapter JSON parse `18/18`、compact schema `14/18`、policy `18/18`。
@@ -149,7 +149,7 @@
 **企业 AI 解决方案售前实验室｜Python / Agent / RAG / Dify / POC / QLoRA**
 
 - 面向制造业设备运维，独立完成需求结构化、方案架构、POC 四阶段验收和云端/本地/量化部署选型，形成可演示、可评测、可审计的解决方案闭环。
-- 设计七节点 Agent、4 个边界工具、SQLite checkpoint、人工审核恢复和 OpenAI-compatible API；24 条 Agent 回归案例关键交付与风险门 `24/24` 通过。
+- 设计十一节点 Agent、证据检索与安全硬门、PostgreSQL/SQLite checkpoint、人工审核恢复和 OpenAI-compatible API；24 条 Agent 回归案例关键交付与风险门 `24/24` 通过。
 - 构建 24 条黄金案例和 72 条隔离数据集，完成 TRL/PEFT QLoRA 与 LLaMA Factory 训练链路；在 Tesla T4 上对 compact decision contract 完成 held-out 对比，adapter JSON parse `18/18`、schema `14/18`、policy `18/18`；12 条安全 red-team cases `12/12` 通过。
 
 ### 6.3 一句话版
@@ -164,7 +164,7 @@
 
 ### 6.5 偏售前技术/解决方案工程师版本
 
-- 使用 Python 实现显式状态图 Agent、边界工具、结构化 schema、SQLite checkpoint、人工 interrupt/resume、JSONL trace 和 OpenAI-compatible API。
+- 使用 Python 实现显式 LangGraph 状态图 Agent、结构化 schema、PostgreSQL/SQLite checkpoint、人工审核事务暂停/恢复、JSONL trace 和 OpenAI-compatible API。
 - 基于 TRL/PEFT 实现 QLoRA 训练入口，完成 ShareGPT 数据构建、源案例隔离、hash manifest、assistant/completion-only loss 兼容和 held-out 评估脚本。
 - 通过 pytest、Ruff、离线 eval、Agent eval、安全 eval、Docker Compose 和 CI 将 Demo 纳入可复现交付流程。
 
@@ -185,11 +185,11 @@
 
 ### 30 秒版本
 
-这是我为 AI 售前/解决方案岗位做的端到端作品集。场景是制造业设备运维，我没有只做一个聊天 Demo，而是把客户需求澄清、RAG 检索、Agent 方案生成、POC 验收、模型/部署选型和风险审核串成一个可运行流程。项目包含 Dify 演示、Python Agent、QLoRA 数据和训练链路、Docker/API 以及评测体系；Agent 24/24 回归通过，安全案例 12/12 通过，并在 Colab Tesla T4 上完成了 compact QLoRA 实测。
+这是我为 AI 售前/解决方案岗位做的端到端作品集。场景是制造业设备运维，我没有只做一个聊天 Demo，而是把客户需求澄清、RAG 检索、Agent 方案生成、POC 验收、模型/部署选型和风险审核串成一个可运行流程。项目包含 Dify 演示、Python/LangGraph Agent、QLoRA 数据和训练链路、Docker Compose/API 以及评测体系；Agent 24/24 回归通过，安全案例 12/12 通过，并在 Colab Tesla T4 上完成了 compact QLoRA 实测。
 
 ### 90 秒版本
 
-我选择制造业设备运维，是因为它同时体现知识问答、结构化输出、证据追溯和私有化部署需求。首先把业务目标、用户、资料来源、峰值并发、时延、成本和合规要求结构化；然后用显式七节点 Agent 依次完成需求澄清、检索、架构、POC、模型策略和风险门。RAG 作为默认基线，因为维修资料会变化且必须引用证据；只有在输出格式或稳定任务模式需要固化、并且有足够高质量数据时，才进入 LoRA/QLoRA。POC 被拆成四阶段，每阶段都有交付物和退出条件。为了证明方案不是“看起来能跑”，我编写了 24 条黄金案例和 12 条安全案例，加入无证据保守回答、提示注入、隐私和越权等失败路径。最后，我提供了 OpenAI-compatible API、Docker、checkpoint、审计 trace 和文档，使方案具备演示、评测和交接条件。
+我选择制造业设备运维，是因为它同时体现知识问答、结构化输出、证据追溯和私有化部署需求。首先把业务目标、用户、资料来源、峰值并发、时延、成本和合规要求结构化；然后用显式十一节点 Agent 依次完成需求澄清、查询改写、检索、方案生成、证据绑定、批评修订和风险门。RAG 作为默认基线，因为维修资料会变化且必须引用证据；只有在输出格式或稳定任务模式需要固化、并且有足够高质量数据时，才进入 LoRA/QLoRA。POC 被拆成四阶段，每阶段都有交付物和退出条件。为了证明方案不是“看起来能跑”，我编写了 24 条黄金案例和 12 条安全案例，加入无证据保守回答、提示注入、隐私和越权等失败路径。最后，我提供了 OpenAI-compatible API、Docker Compose、checkpoint、审计 trace 和文档，使方案具备演示、评测和交接条件。
 
 ### 三分钟展开顺序
 
@@ -264,7 +264,7 @@ RAG 解决“从资料中找依据”，但售前交付还要完成需求澄清�
 **Role:** Independent project owner, responsible for solution design, implementation, evaluation and delivery documentation.
 
 - Designed an end-to-end AI presales workflow for manufacturing equipment maintenance, covering requirement clarification, evidence-grounded RAG, solution architecture, four-phase POC acceptance, model strategy and deployment selection.
-- Implemented a seven-node stateful Agent with bounded tools, SQLite checkpointing, human approval/rejection and resume, redacted JSONL traces and an OpenAI-compatible API; 24/24 Agent regression cases passed schema, delivery and review-gate checks.
+- Implemented an eleven-node LangGraph stateful Agent with PostgreSQL/SQLite checkpointing, evidence binding, bounded structured retries, human approval/rejection and resume, redacted JSONL traces and an OpenAI-compatible API; 24/24 Agent regression cases passed schema, delivery and review-gate checks.
 - Built 24 golden cases and 72 case-isolated ShareGPT-style samples (`train/dev/test = 42/12/18`), with TRL/PEFT QLoRA and LLaMA Factory training configurations, dataset manifests and validation scripts; on a Colab Tesla T4, the compact adapter achieved 100% JSON parse, 14/18 compact-schema pass and 18/18 policy pass on the held-out synthetic split.
 - Defined a RAG-first model decision matrix across cloud APIs, local GGUF/llama.cpp, vLLM and parameter-efficient fine-tuning; 12/12 red-team security cases passed for prompt injection, privacy, excessive agency, unbounded consumption and unsupported claims.
 

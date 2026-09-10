@@ -9,20 +9,24 @@
 5. **可恢复**：每个线程保存 checkpoint，审核后从风险门继续，而不是重新生成一份不可对比的答案。
 6. **可替换模型**：应用层通过结构化契约和 OpenAI-compatible API 与 Dify、云 API、vLLM、llama.cpp 解耦。
 
-## 状态机
+## LangGraph 状态图
 
 ```mermaid
 stateDiagram-v2
     [*] --> intake
-    intake --> retrieve
-    retrieve --> architect
-    architect --> poc
-    poc --> model_strategy
-    model_strategy --> risk_gate
+    intake --> clarify
+    clarify --> query_rewrite
+    query_rewrite --> retrieve
+    retrieve --> draft
+    draft --> ground_claims
+    ground_claims --> critic
+    critic --> repair: 有问题且未超过 1 次
+    critic --> risk_gate: 通过或已达修订上限
+    repair --> risk_gate
+    risk_gate --> human_review: 高风险/合规/无证据/注入
     risk_gate --> finalize: 无高风险
-    risk_gate --> pending_review: 高风险/合规/无证据/注入
-    pending_review --> risk_gate: approve
-    pending_review --> rejected: reject
+    human_review --> done: API 审核事务暂停
+    finalize --> done
     finalize --> done
     rejected --> done
 ```
@@ -31,30 +35,30 @@ stateDiagram-v2
 
 | 节点 | 主要输入 | 主要输出 | 失败处理 |
 |---|---|---|---|
-| `intake` | `CustomerBrief` | 需求、初始风险、澄清问题 | 标记缺失字段，不猜测客户约束 |
-| `retrieve` | 行业、场景、部署、数据、合规 | 证据列表、证据校验、容量输入 | 空召回进入知识覆盖风险 |
-| `architect` | 需求与证据 | 架构组件、部署选项、推荐原则 | 不把检索片段直接当作承诺 |
-| `poc` | 需求、证据 | 四阶段 POC、交付物、退出标准 | 资料不足时保持“先补资料” |
-| `model_strategy` | 部署与并发约束 | RAG/微调/量化/服务决策记录 | 输出待验证输入，不给伪造容量 |
-| `risk_gate` | 全部状态 | `pending_review` 或放行 | 高风险停在人工审核 |
-| `finalize` | 审核状态与全量状态 | `SolutionResponse` | schema、敏感数据和承诺策略阻断 |
+| `intake` / `clarify` | `CustomerBriefV2` | 安全输入策略、缺失字段、澄清问题 | 标记缺失字段，不猜测客户约束 |
+| `query_rewrite` / `retrieve` | 需求与租户/角色 | 查询、ACL 过滤后的证据 | 空召回进入知识覆盖风险 |
+| `draft` / `ground_claims` | 证据与需求 | 本地模型草案、可验证 claim | 丢弃未知 evidence ID |
+| `critic` / `repair` | 草案、证据 | 问题清单、最多一次修订 | 失败进入 `model_unavailable`/审核 |
+| `risk_gate` | 全部状态 | `waiting_for_review` 或放行 | 代码强制高风险停下 |
+| `human_review` | 持久化状态 | reviewer、角色、理由、版本、幂等键 | 乐观锁防止重复覆盖 |
+| `finalize` | 审核状态与全量状态 | `SolutionResponseV2` | schema、敏感数据和承诺策略阻断 |
 
 ## 状态与恢复
 
-本仓库的依赖无关核心使用 SQLite `CheckpointStore`，保存 `AgentState` 的 JSON 快照；本地演示通过：
+本仓库的 v2 运行时用真实 LangGraph `StateGraph` 编排节点。Compose 的 PostgreSQL 路径同时使用官方 `PostgresSaver` 保存图状态和 `interrupt/resume` token，并使用项目自己的 PostgreSQL `CheckpointStore` 保存 run-level 乐观锁、幂等键和审计事件；SQLite 单机测试保留自有 checkpoint 边界。可用本地 fixture 演示：
 
 ```bash
 PYTHONPATH=src python scripts/run_agent.py --case-id case-001 --db .runtime/agent/demo.db
 PYTHONPATH=src python scripts/run_agent.py --case-id case-001 --approve --db .runtime/agent/demo.db
 ```
 
-第一个命令会在 `pending_review` 停下，第二个命令加载相同线程并继续。生产环境应补齐认证、租户隔离、数据库备份、幂等键、审计留存策略和并发冲突处理。
+第一个命令是旧 fixture；正式 API 使用 `POST /v1/projects/{project_id}/runs`，会在 `waiting_for_review`（`error_code=needs_review`）停下，审核 API 加载相同 `run_id` 并用状态版本恢复。Compose 路径使用 PostgreSQL；SQLite 仅用于单机测试。
 
 ## LangGraph 适配边界
 
-`src/ai_presales_copilot/langgraph_adapter.py` 提供可选的线性 StateGraph 适配器；核心 CI 不强制安装 LangGraph，因此在无网络、无额外依赖的情况下仍可运行。若部署到生产，建议将 `risk_gate` 包装为 LangGraph `interrupt()`，使用持久化 checkpointer，以便通过 `Command(resume=...)` 恢复人工决策。
+`src/ai_presales_copilot/llm_agent.py` 的正式路径直接构建并执行 `StateGraph`；模型不可用时只把持久化状态标记为 `model_unavailable`。PostgreSQL 路径的 `human_review` 节点调用 `interrupt()`，审核 API 以 `Command(resume=...)` 恢复；项目 checkpoint 仍负责 reviewer、角色、理由、版本和幂等记录，避免模型自行 `approve`。
 
-本项目没有把“安装了 LangGraph”当成能力证明：面试时应展示节点边界、状态契约、审核恢复、工具权限和评测证据。
+面试时应展示节点边界、状态契约、审核恢复、工具权限和评测证据，而不是只展示“安装了 LangGraph”。
 
 实现依据：[LangGraph checkpointers](https://github.com/langchain-ai/docs/blob/main/src/oss/langgraph/checkpointers.mdx) 将状态按 thread 保存，支持中断后的恢复；[LangGraph interrupt 类型说明](https://github.com/langchain-ai/langgraph/blob/main/libs/langgraph/langgraph/types.py) 明确 interrupt 需要启用 checkpointer。
 

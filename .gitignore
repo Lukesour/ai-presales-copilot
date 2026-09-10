@@ -16,5 +16,7 @@ dist/
 data/results/*.tmp
 data/results/*.log
 data/models/
+models/
 llama_cpp/models/
+.runtime/knowledge/
 .DS_Store

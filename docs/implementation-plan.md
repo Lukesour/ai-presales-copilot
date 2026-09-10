@@ -12,14 +12,14 @@
 
 - `CustomerBrief`、`SolutionResponse` 和 JSON Schema 版本化契约。
 - 显式 Agent 节点：需求、检索、架构、POC、模型策略、风险门、输出。
-- SQLite checkpoint、run/trace/thread ID 和人工审核 approve/reject。
+- PostgreSQL/SQLite checkpoint、run/trace/thread ID 和人工审核 approve/reject；Compose 路径使用 LangGraph 原生 `PostgresSaver` interrupt/resume。
 - 无证据保守回答、提示词注入检测、敏感信息和无依据承诺检查。
 - Dify 工作流说明、Gradio Agent 模式、本地 HTTP API。
 - 24 条合成黄金问题集与离线评测。
 
 ### 验收
 
-`case-001` 首次运行停在 `pending_review`；人工 approve 后完成；没有证据时摘要包含“资料不足”，且不出现产品承诺。
+`case-001` 首次运行停在 `waiting_for_review`（`error_code=needs_review`）；人工 approve 后完成；没有证据时摘要包含“资料不足”，且不出现产品承诺。
 
 ## 第 2 周：POC、部署和微调实验链路
 

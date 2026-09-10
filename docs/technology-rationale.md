@@ -5,7 +5,7 @@
 | 能力 | 选型 | 为什么适合售前作品集 | 本仓库边界 |
 |---|---|---|---|
 | 应用工作流 | [Dify](https://github.com/langgenius/dify) | 可视化知识库、Workflow、模型提供商和 API，适合录屏展示客户交付 | 使用配置、资料、提示词和 API 适配，不声称开发 Dify 内核 |
-| Agent 编排 | [LangGraph](https://github.com/langchain-ai/langgraph) + 依赖无关 fallback | 显式 state graph、checkpoint、interrupt/resume 和 durable execution，适合展示可控 Agent | 核心先用标准库实现；可选适配器提供 LangGraph 生产路径 |
+| Agent 编排 | [LangGraph](https://github.com/langchain-ai/langgraph) + PostgreSQL `PostgresSaver` + 依赖无关测试 fallback | 显式 state graph、节点边界持久化、interrupt 审核恢复和 durable execution，适合展示可控 Agent | Compose 正式路径直接执行 `StateGraph` + 原生 `PostgresSaver`；SQLite/fallback 只服务单机测试和历史 fixture |
 | 训练 | [TRL](https://github.com/huggingface/trl) + [PEFT](https://github.com/huggingface/peft) | 直接支持 conversational SFT、assistant-only/completion-only loss 和 LoRA | 只提交数据治理、配置、脚本和评测协议 |
 | 训练对照 | [LLaMA Factory](https://github.com/hiyouga/LlamaFactory) | 命令行、LoRA/QLoRA、多种训练/导出/推理路径，便于面试展示工具熟悉度 | 只保留 YAML、dataset mapping 和 runbook |
 | GPU serving | [vLLM](https://github.com/vllm-project/vllm) | OpenAI-compatible server、批处理和 LoRA adapter 服务，适合生产候选路径 | 只定义选型和验证输入，不在本机伪造 GPU 结果 |

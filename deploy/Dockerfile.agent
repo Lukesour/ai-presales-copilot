@@ -8,8 +8,11 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 COPY data/knowledge ./data/knowledge
 COPY scripts/serve_agent.py ./scripts/serve_agent.py
+COPY scripts/ingest_sources.py ./scripts/ingest_sources.py
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir '.[runtime,knowledge]' \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin app \
     && mkdir -p /var/lib/ai-presales \
     && chown -R app:app /app /var/lib/ai-presales
@@ -18,6 +21,6 @@ USER app
 EXPOSE 8090
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=2)"
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=2)"
 
-CMD ["python", "scripts/serve_agent.py", "--host", "0.0.0.0", "--port", "8090", "--db", "/var/lib/ai-presales/checkpoints.db"]
+CMD ["python", "scripts/serve_agent.py", "--host", "0.0.0.0", "--port", "8090", "--db", "postgresql://presales:presales@postgres:5432/presales"]

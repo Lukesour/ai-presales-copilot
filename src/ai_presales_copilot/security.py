@@ -35,6 +35,10 @@ SENSITIVE_DATA_PATTERNS = (
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     re.compile(r"(?:公开|外发|泄露|写入).{0,20}(?:邮箱|手机号|身份证)", re.IGNORECASE),
     re.compile(r"(?:邮箱|手机号|身份证).{0,20}(?:公开|外发|泄露|trace)", re.IGNORECASE),
+    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    re.compile(r"(?i)(?:aws_secret_access_key|client_secret|private_key)\s*[:=]\s*[^\s,;]+"),
 )
 
 

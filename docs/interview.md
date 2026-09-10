@@ -30,7 +30,7 @@
 
 ## 8. Agent 为什么需要人工审核
 
-“售前方案有数据出域、合规、价格、SLA、容量和生产操作等高风险边界。我的 Agent 把节点和工具显式化，SQLite checkpoint 保存状态，风险门触发 `pending_review`；人批准后才继续 finalize，拒绝则以 rejected 结束。它展示的是可控性，不是把模型包装成自主决策者。”
+“售前方案有数据出域、合规、价格、SLA、容量和生产操作等高风险边界。我的 Agent 把节点和工具显式化，SQLite/PostgreSQL checkpoint 保存状态，风险门触发 `waiting_for_review` / `needs_review`；人批准后才继续 finalize，拒绝则以 rejected 结束。它展示的是可控性，不是把模型包装成自主决策者。”
 
 ## 9. 微调数据如何避免数据泄漏
 

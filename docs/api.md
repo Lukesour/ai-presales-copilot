@@ -1,63 +1,57 @@
-# 本地 Agent API
+# Phase 1 API
 
-这是一个用于作品集演示的最小 HTTP 服务，不是未加固的生产网关。它展示结构化 Agent、checkpoint、人审恢复和 OpenAI-compatible 适配。
+默认入口是 `scripts/serve_agent.py` 的 FastAPI v2 服务。旧的 `http.server` 只在显式传入 `--mode legacy` 时启用。
 
 ## 启动
 
 ```bash
-PYTHONPATH=src python scripts/serve_agent.py --host 127.0.0.1 --port 8090
+PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
+  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
 ```
 
-## 健康检查
+`/healthz` 是进程存活检查；`/readyz` 同时检查 checkpoint 数据库、知识索引和 llama-server。业务接口需要 `Authorization: Bearer <token>`。开发 token 还支持 `X-Tenant-ID`、`X-User-ID`、`X-Roles`，共享部署必须替换成 OIDC/JWT 校验器。
 
-```bash
-curl -s http://127.0.0.1:8090/health
-curl -s http://127.0.0.1:8090/ready
-```
+## 资源
 
-## 启动一个线程
+| 方法 | 路径 | 最低角色 | 说明 |
+|---|---|---|---|
+| POST | `/v1/projects/{project_id}/runs` | presales | 创建或按 `Idempotency-Key` 重放 run |
+| GET | `/v1/runs/{run_id}` | viewer | 读取脱敏后的状态/响应 |
+| GET | `/v1/runs/{run_id}/events` | viewer | 读取节点和审核事件 |
+| POST | `/v1/runs/{run_id}/reviews` | reviewer | approve/reject；乐观锁 + 幂等 |
+| POST | `/v1/runs/{run_id}/feedback` | presales | 保存评分/标签/反馈 |
+| POST | `/v1/chat/completions` | presales | 返回真实 `run_id` 的兼容 facade |
 
-```bash
-curl -s http://127.0.0.1:8090/v1/runs \
-  -H 'Content-Type: application/json' \
-  -d @- <<'JSON'
+所有写请求需要 `Idempotency-Key`；服务会返回 `X-Request-ID`。错误使用统一对象：`type`、`title`、`status`、`detail`、`request_id`、可选 `errors`。
+
+## v2 brief
+
+```json
 {
-  "thread_id": "demo:manufacturing-001",
-  "brief": {
-    "case_id": "case-001",
-    "industry": "制造业",
-    "use_case": "设备运维知识助手",
-    "data_types": ["维修手册 PDF", "历史工单"],
-    "deployment": "私有化",
-    "concurrency": "峰值 5",
-    "latency_requirement": "完整答案 10 秒内",
-    "compliance": ["数据不能出域"],
-    "raw_request": "请给出可引用、可审计的设备故障问答 POC。"
-  }
+  "schema_version": "2.0",
+  "case_id": "manufacturing-001",
+  "industry": "制造业",
+  "use_case": "设备运维知识助手",
+  "deployment": "私有化",
+  "capacity": {
+    "peak_concurrency": 5,
+    "daily_requests": 1000,
+    "ttft_target_ms": 2000,
+    "full_answer_target_ms": 10000
+  },
+  "governance": {
+    "data_classification": "内部",
+    "residency": "中国境内",
+    "egress_allowed": false,
+    "audit_required": true,
+    "allowed_roles": ["presales", "reviewer"]
+  },
+  "raw_request": "请给出可引用、可审计的设备故障问答 POC。"
 }
-JSON
 ```
 
-如果风险门触发，返回 `status=pending_review`。审核恢复：
-
-```bash
-curl -s http://127.0.0.1:8090/v1/runs/demo:manufacturing-001/review \
-  -H 'Content-Type: application/json' \
-  -d '{"decision":"approve"}'
-```
-
-查看 checkpoint：
-
-```bash
-curl -s http://127.0.0.1:8090/v1/runs/demo:manufacturing-001
-```
+响应包含 `claims[]`、`evidence[]`、`review`、`provenance` 和 `quality`。支持的事实 claim 必须有真实 evidence ID；模型引用不存在的 ID 会被丢弃并触发审核。
 
 ## OpenAI-compatible facade
 
-```bash
-curl -s http://127.0.0.1:8090/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"presales-agent-offline","messages":[{"role":"user","content":"请分析制造业设备运维 AI POC。"}]}'
-```
-
-响应的 `choices[0].message.content` 是 JSON 字符串，内部遵循 `dify/output_schema.json`。生产替换时要加认证、超时、限流、CORS/网络边界、统一错误码和请求大小限制。
+`POST /v1/chat/completions` 不绕过鉴权、检索或审核。`choices[0].message.content` 是 v2 JSON 字符串，顶层 `run_id` 可用于查询事件和提交审核。

@@ -36,6 +36,10 @@ class LlamaClient:
         )
         self.model = model or os.getenv("LLAMA_MODEL", "local-model")
         self.timeout_s = timeout_s
+        self.model_hash = os.getenv("LLAMA_MODEL_SHA256")
+        self.quantization = os.getenv("LLAMA_QUANTIZATION", "Q4_K_M")
+        self.context_length = int(os.getenv("LLAMA_CONTEXT", "8192"))
+        self.llama_cpp_commit = os.getenv("LLAMA_CPP_COMMIT")
 
     def health(self) -> dict[str, Any]:
         request = urllib.request.Request(f"{self.base_url}/health", method="GET")
@@ -46,7 +50,12 @@ class LlamaClient:
             raise LlamaClientError(f"llama.cpp health check failed: {exc}") from exc
 
     def chat(
-        self, messages: list[dict[str, str]], *, temperature: float = 0.0, max_tokens: int = 256
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 256,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         payload = {
             "model": self.model,
@@ -55,6 +64,15 @@ class LlamaClient:
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if response_schema is not None:
+            # llama-server consumes the direct json_schema field; the
+            # response_format wrapper keeps the request compatible with
+            # OpenAI-style gateways without relying on a non-standard nested
+            # schema shape. The caller still validates the body after HTTP
+            # 200 because structured output can be violated by some model/
+            # server combinations.
+            payload["response_format"] = {"type": "json_object"}
+            payload["json_schema"] = response_schema
         started = time.perf_counter()
         body = self._post("/v1/chat/completions", payload)
         latency_ms = (time.perf_counter() - started) * 1000
@@ -70,7 +88,12 @@ class LlamaClient:
         )
 
     def chat_stream(
-        self, messages: list[dict[str, str]], *, temperature: float = 0.0, max_tokens: int = 256
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 256,
+        response_schema: dict[str, Any] | None = None,
     ) -> GenerationResult:
         payload = {
             "model": self.model,
@@ -80,6 +103,9 @@ class LlamaClient:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if response_schema is not None:
+            payload["response_format"] = {"type": "json_object"}
+            payload["json_schema"] = response_schema
         started = time.perf_counter()
         first_token_at: float | None = None
         chunks: list[str] = []

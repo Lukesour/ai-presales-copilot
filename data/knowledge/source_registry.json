@@ -1,0 +1,38 @@
+[
+  {
+    "source_id": "repo-deployment-security",
+    "title": "项目内置部署与安全资料",
+    "license": "repository-synthetic",
+    "local_path": "data/knowledge/deployment-security.md",
+    "tenant_id": "public",
+    "retrieval_only": true,
+    "training_allowed": false
+  },
+  {
+    "source_id": "repo-inference-deployment",
+    "title": "项目内置推理部署资料",
+    "license": "repository-synthetic",
+    "local_path": "data/knowledge/inference-deployment.md",
+    "tenant_id": "public",
+    "retrieval_only": true,
+    "training_allowed": false
+  },
+  {
+    "source_id": "repo-product-capability",
+    "title": "项目内置产品能力资料",
+    "license": "repository-synthetic",
+    "local_path": "data/knowledge/product-capability.md",
+    "tenant_id": "public",
+    "retrieval_only": true,
+    "training_allowed": false
+  },
+  {
+    "source_id": "repo-retrieval-grounding",
+    "title": "项目内置检索与证据资料",
+    "license": "repository-synthetic",
+    "local_path": "data/knowledge/retrieval-and-grounding.md",
+    "tenant_id": "public",
+    "retrieval_only": true,
+    "training_allowed": false
+  }
+]

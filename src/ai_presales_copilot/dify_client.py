@@ -38,7 +38,7 @@ class DifyClient:
     def chat(self, brief: CustomerBrief, *, stream: bool = False) -> SolutionResponse:
         if not self.configured:
             raise DifyClientError(
-                "DIFY_APP_API_KEY is not configured; use --mode mock for offline demo"
+                "DIFY_APP_API_KEY is not configured; use the local-model FastAPI API for the Phase 1 path"
             )
         payload = {
             "inputs": {"customer_brief": json.dumps(brief.to_dict(), ensure_ascii=False)},

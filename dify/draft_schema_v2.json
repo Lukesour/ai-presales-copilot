@@ -1,0 +1,418 @@
+{
+  "$defs": {
+    "ClaimV2": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "claim_type": {
+          "enum": [
+            "fact",
+            "recommendation",
+            "assumption",
+            "unknown"
+          ],
+          "title": "Claim Type",
+          "type": "string"
+        },
+        "support_status": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "needs_review"
+          ],
+          "title": "Support Status",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        }
+      },
+      "required": [
+        "claim_id",
+        "text",
+        "claim_type",
+        "support_status"
+      ],
+      "title": "ClaimV2",
+      "type": "object"
+    },
+    "PocPhaseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "phase": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "objective": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "activities": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Activities",
+          "type": "array"
+        },
+        "deliverables": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Deliverables",
+          "type": "array"
+        },
+        "exit_criteria": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Exit Criteria",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "objective",
+        "exit_criteria"
+      ],
+      "title": "PocPhaseV2",
+      "type": "object"
+    },
+    "RequirementV2": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "priority": {
+          "default": "should",
+          "enum": [
+            "must",
+            "should",
+            "nice_to_have"
+          ],
+          "title": "Priority",
+          "type": "string"
+        },
+        "source": {
+          "default": "customer",
+          "enum": [
+            "customer",
+            "customer_brief",
+            "inferred",
+            "system",
+            "reviewer"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "RequirementV2",
+      "type": "object"
+    },
+    "ReviewV2": {
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "status": {
+          "default": "not_required",
+          "enum": [
+            "not_required",
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reviewer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewer Id"
+        },
+        "reviewer_role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewer Role"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "requested_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested At"
+        },
+        "decided_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided At"
+        },
+        "state_version": {
+          "default": 0,
+          "minimum": 0,
+          "title": "State Version",
+          "type": "integer"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Idempotency Key"
+        }
+      },
+      "title": "ReviewV2",
+      "type": "object"
+    },
+    "RiskV2": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Category",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "severity": {
+          "default": "medium",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "action": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "description",
+        "action"
+      ],
+      "title": "RiskV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Model-facing response; retrieved evidence content stays host-owned.",
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "case_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Case Id",
+      "type": "string"
+    },
+    "executive_summary": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Executive Summary",
+      "type": "string"
+    },
+    "requirements": {
+      "items": {
+        "$ref": "#/$defs/RequirementV2"
+      },
+      "maxItems": 128,
+      "title": "Requirements",
+      "type": "array"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/ClaimV2"
+      },
+      "maxItems": 256,
+      "title": "Claims",
+      "type": "array"
+    },
+    "recommendations": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Recommendations",
+      "type": "array"
+    },
+    "architecture": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Architecture",
+      "type": "array"
+    },
+    "implementation_steps": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Implementation Steps",
+      "type": "array"
+    },
+    "risks": {
+      "items": {
+        "$ref": "#/$defs/RiskV2"
+      },
+      "maxItems": 128,
+      "title": "Risks",
+      "type": "array"
+    },
+    "clarifying_questions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Clarifying Questions",
+      "type": "array"
+    },
+    "selected_evidence_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 256,
+      "title": "Selected Evidence Ids",
+      "type": "array"
+    },
+    "poc_plan": {
+      "items": {
+        "$ref": "#/$defs/PocPhaseV2"
+      },
+      "maxItems": 16,
+      "title": "Poc Plan",
+      "type": "array"
+    },
+    "model_strategy": {
+      "additionalProperties": true,
+      "title": "Model Strategy",
+      "type": "object"
+    },
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "review": {
+      "$ref": "#/$defs/ReviewV2"
+    }
+  },
+  "required": [
+    "case_id",
+    "executive_summary"
+  ],
+  "title": "SolutionDraftV2",
+  "type": "object"
+}

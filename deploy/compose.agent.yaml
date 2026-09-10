@@ -1,12 +1,69 @@
 services:
-  presales-agent:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: presales
+      POSTGRES_USER: presales
+      POSTGRES_PASSWORD: presales
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U presales -d presales"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  llama-server:
+    image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp@sha256:17155a3ce4cc906728ec99a2814bf0b4eaffaf3b4872bad8c3affed310cdbc35}
+    command:
+      - "-m"
+      - "/models/${LLAMA_MODEL_FILE:-Qwen3-8B-Q4_K_M.gguf}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "-c"
+      - "${LLAMA_CONTEXT:-8192}"
+      - "-ngl"
+      - "${LLAMA_GPU_LAYERS:-999}"
+      - "--alias"
+      - "${LLAMA_MODEL:-qwen3-8b-q4}"
+      - "--jinja"
+      - "--reasoning"
+      - "off"
+    volumes:
+      - ${MODEL_DIR:-../models}:/models:ro
+    restart: unless-stopped
+
+  presales-migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      CHECKPOINT_DB: postgresql://presales:presales@postgres:5432/presales
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  presales-api:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.agent
     ports:
       - "8090:8090"
     volumes:
-      - agent-checkpoints:/var/lib/ai-presales
+      - agent-data:/var/lib/ai-presales
+      - knowledge-data:/var/lib/ai-presales/knowledge:ro
+    environment:
+      CHECKPOINT_DB: postgresql://presales:presales@postgres:5432/presales
+      LLAMA_BASE_URL: http://llama-server:8080
+      LLAMA_MODEL: ${LLAMA_MODEL:-qwen3-8b-q4}
+      LLAMA_MODEL_SHA256: ${LLAMA_MODEL_SHA256:-}
+      PRESALES_ALLOW_DEV_AUTH: "true"
+      PRESALES_DEV_TOKEN: ${PRESALES_DEV_TOKEN:-dev-token}
+      KNOWLEDGE_CHUNKS: /var/lib/ai-presales/knowledge/chunks.jsonl
     read_only: true
     tmpfs:
       - /tmp
@@ -14,7 +71,41 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      presales-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
+  # Optional one-shot import. Run with:
+  # docker compose --profile ingest run --rm presales-ingest
+  presales-ingest:
+    profiles: ["ingest"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+    command:
+      - python
+      - scripts/ingest_sources.py
+      - --chunks
+      - /var/lib/ai-presales/knowledge/chunks.jsonl
+      - --manifest
+      - /var/lib/ai-presales/knowledge/manifest.jsonl
+      - --postgres-dsn
+      - postgresql://presales:presales@postgres:5432/presales
+    volumes:
+      - knowledge-data:/var/lib/ai-presales/knowledge
+    environment:
+      CHECKPOINT_DB: postgresql://presales:presales@postgres:5432/presales
+    depends_on:
+      postgres:
+        condition: service_healthy
+      presales-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
 volumes:
-  agent-checkpoints:
+  postgres-data:
+  agent-data:
+  knowledge-data:

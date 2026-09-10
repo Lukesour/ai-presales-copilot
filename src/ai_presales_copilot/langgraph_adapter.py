@@ -1,9 +1,9 @@
-"""Optional LangGraph integration for the same explicit portfolio graph.
+"""Legacy LangGraph integration for the original portfolio fixture graph.
 
-The core package stays dependency-free for offline CI.  Installing the
-``agent`` extra enables this adapter and gives the project a direct path to
-LangGraph persistence, interrupts, and deployment without changing the public
-state contract.
+The formal v2 local-model workflow lives in :mod:`llm_agent` and owns the
+eleven-node graph, PostgreSQL ``PostgresSaver`` and API review contract.  This
+module remains only so historical seven-node fixture evaluations can compile
+without changing their public state contract.
 """
 
 from __future__ import annotations
@@ -44,8 +44,8 @@ def build_langgraph_graph(
     """Compile a linear graph from named node handlers.
 
     Handlers receive a state dictionary and return a partial state update.  A
-    caller can replace the ``risk_gate`` edge with an ``interrupt`` in a
-    deployment-specific wrapper while keeping the same node boundaries.
+    The legacy caller can still compile a small deterministic graph for
+    historical regression tests; it is not the Phase 1 product entrypoint.
     """
 
     try:
@@ -77,14 +77,14 @@ def build_reviewable_langgraph_graph(
     *,
     checkpointer: Any | None = None,
 ):
-    """Compile the same graph with a real LangGraph human-review interrupt.
+    """Compile the legacy graph with a real LangGraph human-review interrupt.
 
     The wrapped ``risk_gate`` must return ``review_status=pending`` or
     ``status=pending_review`` when human input is required.  The compiled graph
     then pauses with ``interrupt()`` and resumes with
     ``graph.invoke(Command(resume="approve"), config=...)``.  A persistent
-    checkpointer is required for a production deployment; the argument stays
-    optional so import-time CI remains dependency-free.
+    The formal v2 path uses the same pattern in ``llm_agent.py`` with the
+    PostgreSQL saver; this helper stays optional for historical fixtures.
     """
 
     try:
