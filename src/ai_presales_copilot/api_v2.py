@@ -194,9 +194,15 @@ def create_fastapi_app(
 
     @app.get("/readyz")
     async def readyz():
+        knowledge_loaded = bool(getattr(knowledge_base, "documents", []))
+        if knowledge_index is not None and not knowledge_loaded:
+            try:
+                knowledge_loaded = bool(knowledge_index.has_sources())
+            except Exception:  # noqa: BLE001 - the dedicated pgvector check below reports details
+                knowledge_loaded = False
         checks: dict[str, Any] = {
             "database": False,
-            "knowledge_index": bool(getattr(knowledge_base, "documents", [])),
+            "knowledge_index": knowledge_loaded,
             "model": False,
         }
         if knowledge_index is not None:
@@ -467,6 +473,9 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "current_node": state.get("current_node"),
         "state_version": state.get("state_version", 0),
         "response": state.get("response"),
+        # Keep only the deterministic missing-field projection public; prompts,
+        # policy matches, and other internal workflow state stay server-owned.
+        "clarify": state.get("clarify", {"missing_fields": [], "questions": []}),
         "review": state.get("review"),
         "errors": state.get("errors", []),
         "error_code": state.get("error_code"),

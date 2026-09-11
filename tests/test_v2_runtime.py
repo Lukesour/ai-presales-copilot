@@ -10,6 +10,7 @@ from ai_presales_copilot.ingestion import (
     IngestionRejected,
     SourceRegistry,
     SourceSpec,
+    _AllowlistedRedirectHandler,
     ingest_source,
 )
 from ai_presales_copilot.knowledge import KnowledgeBase
@@ -70,6 +71,25 @@ class FlakyModel(FakeModel):
 class AlwaysInvalidModel(FakeModel):
     def chat(self, _messages, **_kwargs):
         return GenerationResult("not-json", self.model, 1, 1, 2, 0.1, 0.1)
+
+
+class SensitiveOutputModel(FakeModel):
+    def chat(self, messages, **kwargs):
+        result = super().chat(messages, **kwargs)
+        properties = kwargs["response_schema"].get("properties", {})
+        if "queries" not in properties and "pass" not in properties:
+            payload = json.loads(result.text)
+            payload["executive_summary"] = "联系人手机号 13812345678，邮箱 leaked@example.com"
+            return GenerationResult(
+                json.dumps(payload, ensure_ascii=False),
+                self.model,
+                result.prompt_tokens,
+                result.completion_tokens,
+                result.total_tokens,
+                result.latency_ms,
+                result.time_to_first_token_ms,
+            )
+        return result
 
 
 def _brief(**overrides):
@@ -163,6 +183,18 @@ def test_sensitive_customer_input_requires_review():
         assert state["status"] == "waiting_for_review"
         assert state["policy"]["sensitive_blocked"] is True
         assert state["error_code"] == "needs_review"
+
+
+def test_sensitive_model_output_is_redacted_before_checkpoint():
+    with CheckpointStore(":memory:") as store:
+        workflow = LocalModelWorkflow(SensitiveOutputModel(), KnowledgeBase("data/knowledge"), store)
+        state = workflow.run(CustomerBriefV2.model_validate(_brief()), thread_id="sensitive-output", idempotency_key="x")
+        serialized = json.dumps(state["response"], ensure_ascii=False)
+        assert state["status"] == "waiting_for_review"
+        assert "13812345678" not in serialized
+        assert "leaked@example.com" not in serialized
+        assert "[PHONE_REDACTED]" in serialized
+        assert "[EMAIL_REDACTED]" in serialized
 
 
 def test_native_langgraph_interrupt_resumes_review():
@@ -347,6 +379,26 @@ def test_knowledge_retrieval_filters_tenant_acl_and_effective_time(tmp_path: Pat
     assert knowledge.revoke_source("tenant-source") == 1
 
 
+def test_authoritative_empty_sql_index_does_not_fallback_to_local_chunks():
+    class EmptyAuthoritativeIndex:
+        def has_sources(self):
+            return True
+
+        def search(self, *_args, **_kwargs):
+            return []
+
+    with CheckpointStore(":memory:") as store:
+        workflow = LocalModelWorkflow(
+            FakeModel(),
+            KnowledgeBase("data/knowledge"),
+            store,
+            knowledge_index=EmptyAuthoritativeIndex(),
+        )
+        brief = CustomerBriefV2.model_validate(_brief())
+        evidence = workflow._retrieve(["制造业 设备运维"], brief, {"tenant_id": "local", "roles": []})
+        assert evidence == []
+
+
 def test_remote_ingestion_requires_https_allowlisted_source():
     with pytest.raises(IngestionRejected):
         SourceSpec(
@@ -355,6 +407,19 @@ def test_remote_ingestion_requires_https_allowlisted_source():
             license="test",
             source_url="http://127.0.0.1/private",
             allowed_domains=("127.0.0.1",),
+        )
+
+
+def test_remote_redirect_rechecks_allowlist_and_private_networks():
+    handler = _AllowlistedRedirectHandler(("docs.example.com",))
+    with pytest.raises(IngestionRejected):
+        handler.redirect_request(
+            None,
+            None,
+            302,
+            "Found",
+            "http://127.0.0.1/private",
+            {},
         )
 
 

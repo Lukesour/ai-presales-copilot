@@ -205,7 +205,7 @@ class PostgresKnowledgeIndex:
         ]
         params: list[object] = [normalized_query, f"%{normalized_query}%"]
         if tenant_id:
-            conditions.append("kc.tenant_id IN ('public', %s)")
+            conditions.append("ks.tenant_id IN ('public', %s) AND kc.tenant_id = ks.tenant_id")
             params.append(tenant_id)
         if source_ids is not None:
             if not source_ids:
@@ -216,13 +216,16 @@ class PostgresKnowledgeIndex:
         if not is_admin:
             if role_list:
                 conditions.append(
+                    "(ks.acl = '[]'::jsonb OR EXISTS ("
+                    "SELECT 1 FROM jsonb_array_elements_text(ks.acl) AS allowed(role) "
+                    "WHERE allowed.role = ANY(%s::text[]))) AND "
                     "(kc.acl = '[]'::jsonb OR EXISTS ("
                     "SELECT 1 FROM jsonb_array_elements_text(kc.acl) AS allowed(role) "
-                    "WHERE allowed.role = ANY(%s::text[])" "))"
+                    "WHERE allowed.role = ANY(%s::text[])))"
                 )
-                params.append(list(role_list))
+                params.extend([list(role_list), list(role_list)])
             else:
-                conditions.append("kc.acl = '[]'::jsonb")
+                conditions.append("ks.acl = '[]'::jsonb AND kc.acl = '[]'::jsonb")
 
         sql = f"""
             SELECT kc.evidence_id, kc.source_id, kc.version, kc.title, kc.excerpt,
@@ -270,6 +273,14 @@ class PostgresKnowledgeIndex:
         with self._lock, self.connection.cursor() as cursor:
             cursor.execute("SELECT 1 FROM pg_extension WHERE extname='vector'")
             return cursor.fetchone() is not None
+
+    def has_sources(self) -> bool:
+        """Tell the workflow whether SQL search is authoritative yet."""
+
+        with self._lock, self.connection.cursor() as cursor:
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM knowledge_sources)")
+            row = cursor.fetchone()
+        return bool(row and row[0])
 
     def close(self) -> None:
         with self._lock:

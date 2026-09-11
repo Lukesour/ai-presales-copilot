@@ -56,10 +56,12 @@ services:
     volumes:
       - agent-data:/var/lib/ai-presales
       - knowledge-data:/var/lib/ai-presales/knowledge:ro
+      - ${MODEL_DIR:-../models}:/models:ro
     environment:
       CHECKPOINT_DB: postgresql://presales:presales@postgres:5432/presales
       LLAMA_BASE_URL: http://llama-server:8080
       LLAMA_MODEL: ${LLAMA_MODEL:-qwen3-8b-q4}
+      LLAMA_MODEL_PATH: /models/${LLAMA_MODEL_FILE:-Qwen3-8B-Q4_K_M.gguf}
       LLAMA_MODEL_SHA256: ${LLAMA_MODEL_SHA256:-}
       PRESALES_ALLOW_DEV_AUTH: "true"
       PRESALES_DEV_TOKEN: ${PRESALES_DEV_TOKEN:-dev-token}

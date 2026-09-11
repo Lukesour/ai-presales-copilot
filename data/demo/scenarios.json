@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0",
+  "scenarios": [
+    {
+      "scenario_id": "normal",
+      "label": "正常方案",
+      "description": "需求、部署、容量和治理边界较完整，适合展示端到端方案生成。",
+      "brief": {
+        "schema_version": "2.0",
+        "case_id": "demo-normal-001",
+        "industry": "制造业",
+        "use_case": "设备维修知识问答",
+        "data_types": ["维修手册 PDF", "历史工单"],
+        "deployment": "公有云 API",
+        "capacity": {
+          "average_concurrency": 2.0,
+          "peak_concurrency": 5,
+          "daily_requests": 500,
+          "ttft_target_ms": 2000,
+          "full_answer_target_ms": 10000
+        },
+        "governance": {
+          "data_classification": "内部业务资料",
+          "residency": "中国境内",
+          "egress_allowed": true,
+          "retention_days": 30,
+          "audit_required": false,
+          "allowed_roles": ["presales", "reviewer"]
+        },
+        "budget": "POC 预算待确认",
+        "integrations": ["企业文档库", "统一身份认证"],
+        "acceptance_criteria": ["关键问题可引用来源", "完成答案延迟不超过 10 秒"],
+        "raw_request": "请设计一个设备维修知识问答 POC，先使用公有云 API 验证业务价值。"
+      },
+      "expected": {
+        "status": "complete",
+        "missing_fields": []
+      }
+    },
+    {
+      "scenario_id": "missing",
+      "label": "信息缺失",
+      "description": "客户只描述业务目标，尚未确认部署、容量、时延和数据驻留边界。",
+      "brief": {
+        "schema_version": "2.0",
+        "case_id": "demo-missing-001",
+        "industry": "制造业",
+        "use_case": "设备维修知识问答",
+        "data_types": ["维修手册 PDF", "历史工单"],
+        "deployment": "未说明",
+        "capacity": {},
+        "governance": {},
+        "budget": "未说明",
+        "integrations": [],
+        "acceptance_criteria": [],
+        "raw_request": "我们想把设备维修手册做成知识问答，请先给出一个初步方案。"
+      },
+      "expected": {
+        "missing_fields": [
+          "deployment",
+          "capacity.peak_concurrency",
+          "capacity.latency_target",
+          "governance.residency"
+        ]
+      }
+    },
+    {
+      "scenario_id": "high_risk",
+      "label": "高风险需审核",
+      "description": "客户数据不能出域并要求审计，需要人工确认部署和合规边界。",
+      "brief": {
+        "schema_version": "2.0",
+        "case_id": "demo-high-risk-001",
+        "industry": "制造业",
+        "use_case": "设备维修知识问答",
+        "data_types": ["维修手册 PDF", "历史工单"],
+        "deployment": "私有化",
+        "capacity": {
+          "peak_concurrency": 5,
+          "full_answer_target_ms": 10000
+        },
+        "governance": {
+          "data_classification": "内部敏感",
+          "residency": "中国境内",
+          "egress_allowed": false,
+          "audit_required": true,
+          "allowed_roles": ["presales", "reviewer", "admin"]
+        },
+        "budget": "硬件和运维成本待评估",
+        "integrations": ["内网文档库", "审计平台"],
+        "acceptance_criteria": ["数据不出域", "保留审核和访问审计记录"],
+        "raw_request": "请设计一个数据不能出域、可审计的设备维修知识问答方案。"
+      },
+      "expected": {
+        "status_before_review": "waiting_for_review",
+        "status_after_approval": "complete",
+        "missing_fields": []
+      }
+    }
+  ]
+}

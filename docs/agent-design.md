@@ -62,10 +62,10 @@ PYTHONPATH=src python scripts/run_agent.py --case-id case-001 --approve --db .ru
 
 实现依据：[LangGraph checkpointers](https://github.com/langchain-ai/docs/blob/main/src/oss/langgraph/checkpointers.mdx) 将状态按 thread 保存，支持中断后的恢复；[LangGraph interrupt 类型说明](https://github.com/langchain-ai/langgraph/blob/main/libs/langgraph/langgraph/types.py) 明确 interrupt 需要启用 checkpointer。
 
-## 生产化缺口清单
+## Phase 1 已完成、共享部署前仍需补齐
 
-- API：OIDC/JWT、租户隔离、请求限流、审计访问控制和幂等。
-- 数据：文档权限继承、删除/撤回、版本标签、PII 分类和向量库生命周期。
-- 模型：模型/Tokenizer/Adapter/量化文件 digest、回滚和兼容性矩阵。
-- 运行：OTel trace、指标告警、队列、重试预算、超时和人工兜底。
-- 评测：固定黄金集、对抗集、回归阈值、人工抽检和线上漂移监控。
+- API：Phase 1 已具备开发 token、租户/项目/RBAC、限流、request ID、幂等和审计事件；共享部署仍需接入 OIDC/JWT、企业目录和集中式审计访问策略。
+- 数据：Phase 1 已具备来源登记、版本/hash、文档 ACL、撤回和敏感/注入隔离；生产还需完善文档权限继承、删除证明、向量生命周期和备份恢复。
+- 模型：Phase 1 已记录模型 hash、量化、上下文、llama.cpp digest 和采样参数；上线前还需补齐 tokenizer/adapter 兼容矩阵、回滚和供应链签名。
+- 运行：Phase 1 已有 OTel span、脱敏 JSONL、超时、有限重试和人工兜底；生产还需接入 collector、指标告警、队列、资源配额和灾备演练。
+- 评测：Phase 1 已有固定案例、红队、数据集 manifest 和回归入口；生产还需扩充专家 gold、线上反馈闭环、漂移监控和发布阈值。

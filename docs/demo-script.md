@@ -1,42 +1,111 @@
-# Three Minute Demo Script
+# 求职演示脚本（约三分钟）
 
-## 0:00–0:25 业务问题
+## 启动前检查
 
-“售前沟通经常面对产品资料分散、客户约束不完整、方案结论难追溯的问题。我做了一个 AI Presales Copilot，把客户需求、知识检索、Agent 编排、POC 验收和模型部署选型串成一个可审计流程。”
+先运行离线契约检查：
 
-## 0:25–1:20 Agent 与应用层演示
+```bash
+PYTHONPATH=src python scripts/check_demo_replays.py
+```
 
-选择 `case-001`：制造业设备运维 AI 方案，要求私有化、数据不能出域和峰值并发。
+如果要演示 Live API，再启动 FastAPI、PostgreSQL/SQLite checkpoint 和 llama-server：
 
-展示：
+```bash
+PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
+  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
+```
 
-- 结构化需求字段
-- 推荐方案
-- 引用证据
-- 数据出域和容量风险
-- 待确认问题
-- 四阶段 POC 的退出标准
-- RAG-first 与 LoRA/QLoRA 的边界
+打开页面：
 
-强调：系统不会在资料不足时直接承诺准确率、SLA 或生产容量。
+```bash
+uv sync --locked --extra demo
+PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
+```
 
-再次运行或打开 `case-001` 的 JSON，展示 `waiting_for_review` / `error_code=needs_review`；点击/命令行 approve，说明 checkpoint 会从人工审核点恢复，而不是重新生成一份不可比较的结果。
+页面默认是 `Live API`。如果 `/readyz` 未就绪，直接切换 `Demo Replay`，不会影响完整讲解。
 
-演示环境建议：本地 Q4 只展示 Dify → OpenAI-compatible llama.cpp 的接入链路和延迟；如果要展示稳定的中文方案质量，先在 Dify 中切换到试用 API，并保留同一知识库、提示词和测试问题。不要把 0.5B 本地模型的输出质量当成生产结论。
+## 0:00–0:20：问题和 readiness
 
-## 1:20–2:25 微调与基础设施演示
+“售前方案通常遇到三个问题：客户约束不完整、产品事实难追溯、高风险结论缺少审核。我把它们放进一个结构化、可恢复的 Agent 流程里。”
 
-先展示 `data/finetuning/manifest.json`：源案例级 split、hash 和消息统计。说明：事实知识仍放在 RAG，LoRA/QLoRA 只用于稳定格式、分类和工具参数；本机没有 CUDA 时只展示 dry-run，不假装已经训练出收益。
+展示顶部 `/readyz`：
 
-展示 llama.cpp 的本地 OpenAI-compatible 服务和基准报告。
+- `/healthz` 只说明 API 进程存活；
+- `/readyz` 检查数据库、知识索引和模型；
+- 未就绪时 Live 生成不会发送创建 run 请求，Replay 仍可用。
 
-说明：
+## 0:20–1:05：正常方案与完整 v2 输出
 
-- Q4/Q8 量化对内存和速度的影响
-- Colab CUDA（或本机 Metal）与 CPU 的差异
-- 单并发和并发 4 的 p95 延迟
-- 本地部署对数据安全的价值和运维代价
+选择 `正常方案 · normal`，点击“生成方案”。在“方案总览”依次展示：
 
-## 2:25–3:00 售前结论
+- 页面顶部的完整 `CustomerBriefV2`：行业、场景、数据类型、部署、容量、治理、预算、集成和验收标准；
+- 执行摘要、结构化需求、建议、架构、实施步骤；
+- POC 的 objective、activities、deliverables、exit criteria；
+- 完整 `model_strategy`、假设、澄清问题、审核、provenance 和 quality。
 
-“如果客户优先验证业务价值，我会先用 Dify 加试用 API；如果客户数据不能出域，我会把模型后端切换到本地推理服务，再在客户目标硬件上重做容量测试。只有当 RAG baseline 暴露出稳定的格式或分类问题时，才考虑 LoRA/QLoRA。最终选型取决于数据边界、模型质量、并发、时延和总拥有成本，而不是单看模型名称。”
+强调：页面不是只展示一段自然语言，而是把 `SolutionResponseV2` 的 17 个主要字段逐个投影出来；原始 JSON 只放在折叠区域。
+
+## 1:05–1:35：Agent 时间线
+
+打开“Agent 时间线”：
+
+```text
+intake → clarify → query_rewrite → retrieve → draft → ground_claims
+      → critic → repair → risk_gate → human_review → finalize
+```
+
+说明：时间线来自 `GET /v1/runs/{run_id}/events`，Live 和 Replay 使用同一套纯渲染函数。
+没有执行的 `repair` 仍显示“未执行”；没有可靠耗时的位置显示 `—`，不虚构性能数据。
+
+## 1:35–2:00：Claim—Evidence 追溯
+
+打开“证据追溯”：
+
+- 一个 Claim 对应多个 evidence 时拆成多行；
+- 每行展示支持状态、证据 ID、来源、版本、页码、locator、hash 和摘要；
+- 没有证据的 Claim 显示 `—`，`unknown`/`needs_review` 保留醒目标记；
+- 事实型 Claim 的 evidence ID 在 API 和 Replay 加载时都会校验。
+
+“因此模型只负责提出受约束的文本，事实绑定、权限和风险门由确定性代码控制。”
+
+## 2:00–2:20：信息缺失案例
+
+切换 `信息缺失 · missing` 并加载 Replay，展示 `clarify.missing_fields`：
+
+```text
+deployment
+capacity.peak_concurrency
+capacity.latency_target
+governance.residency
+```
+
+说明：系统不会因为缺少部署、容量和合规信息就猜测云端、本地或 SLA，而是生成澄清问题。
+
+## 2:20–2:45：高风险审核案例
+
+切换 `高风险需审核 · high_risk`，展示：
+
+```text
+waiting_for_review → approve → complete
+```
+
+在“风险审核”中解释数据不能出域、审计要求和高风险动作。点击“人工审核通过”：
+
+- Live 模式调用正式审核 API，并重新读取 run/events；
+- Replay 模式只切换到已捕获的 `final` 快照；
+- 页面明确标记 Replay 未写入真实运行状态。
+
+## 2:45–3:00：边界说明
+
+“这个版本是求职演示：案例和资料是合成的，Replay 是静态快照，离线评测和单机基准不等于生产 SLA。生产化还需要 OIDC/JWT、目标硬件容量测试、真实数据治理和企业连接器。当前演示重点是把需求、证据、Agent 状态和人工审核串成可解释的交付闭环。”
+
+## 快照维护
+
+只有正式 API 和模型就绪时才捕获新快照：
+
+```bash
+PYTHONPATH=src python scripts/capture_demo_replays.py --api-url http://127.0.0.1:8090 --force
+PYTHONPATH=src python scripts/check_demo_replays.py
+```
+
+快照文件不能手写 Authorization、API Key、真实客户资料或敏感字段。高风险快照必须同时保存审核前的 `pending` 和审核后的 `final`。

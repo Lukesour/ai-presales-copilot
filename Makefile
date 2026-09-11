@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PYTHONPATH := src
 
-.PHONY: test lint demo eval agent-eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check schema-export ingest self-qa lock-check compose-config
+.PHONY: test lint demo eval agent-eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check schema-export ingest self-qa lock-check compose-config demo-replay-check demo-capture
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest -q
@@ -23,6 +23,12 @@ self-qa:
 
 compose-config:
 	docker compose -f deploy/compose.agent.yaml config
+
+demo-replay-check:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/check_demo_replays.py
+
+demo-capture:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/capture_demo_replays.py
 
 demo:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_demo.py --case-id case-001

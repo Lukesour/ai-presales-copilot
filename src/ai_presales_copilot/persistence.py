@@ -241,7 +241,12 @@ class PostgresCheckpointStore:
         *,
         expected_version: int | None = None,
     ) -> int:
-        with self._lock, self.connection.cursor() as cursor:
+        # The connection is autocommit for LangGraph's PostgresSaver, so the
+        # version read and write must explicitly share one transaction.  A
+        # standalone SELECT ... FOR UPDATE would otherwise release its lock
+        # before the INSERT/UPDATE and allow two reviewers to pass the same
+        # optimistic-lock check.
+        with self._lock, self.connection.transaction(), self.connection.cursor() as cursor:
             cursor.execute(
                 "SELECT state_version FROM agent_checkpoints WHERE thread_id = %s FOR UPDATE",
                 (thread_id,),
@@ -310,7 +315,7 @@ class PostgresCheckpointStore:
         ]
 
     def delete(self, thread_id: str) -> None:
-        with self._lock, self.connection.cursor() as cursor:
+        with self._lock, self.connection.transaction(), self.connection.cursor() as cursor:
             cursor.execute("DELETE FROM agent_events WHERE thread_id = %s", (thread_id,))
             cursor.execute("DELETE FROM agent_checkpoints WHERE thread_id = %s", (thread_id,))
 

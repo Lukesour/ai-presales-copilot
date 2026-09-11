@@ -1,0 +1,72 @@
+{
+  "replay_schema_version": "1.0",
+  "scenario_id": "normal",
+  "label": "正常方案",
+  "case_id": "demo-normal-001",
+  "synthetic": true,
+  "captured_from": "live_api",
+  "captured_at": "2026-09-11T00:00:00Z",
+  "provenance": {
+    "git_revision": "demo-capture",
+    "model_name": "qwen3-8b-q4",
+    "model_hash": "sha256:demo-normal",
+    "prompt_version": "v2-local-model-presales-graph-2026-09-09",
+    "knowledge_snapshot_id": "repository-knowledge-v1"
+  },
+  "events": [
+    {"seq": 1, "event_type": "node_finished", "node": "intake", "status": "running", "state_version": 2, "created_at": "2026-09-11T00:00:01Z", "node_latency_ms": 3.2},
+    {"seq": 2, "event_type": "node_finished", "node": "clarify", "status": "running", "state_version": 3, "created_at": "2026-09-11T00:00:02Z", "node_latency_ms": 1.1},
+    {"seq": 3, "event_type": "node_finished", "node": "query_rewrite", "status": "running", "state_version": 4, "created_at": "2026-09-11T00:00:03Z", "node_latency_ms": 280.4},
+    {"seq": 4, "event_type": "node_finished", "node": "retrieve", "status": "running", "state_version": 5, "created_at": "2026-09-11T00:00:04Z", "node_latency_ms": 4.7},
+    {"seq": 5, "event_type": "node_finished", "node": "draft", "status": "running", "state_version": 6, "created_at": "2026-09-11T00:00:05Z", "node_latency_ms": 1420.8},
+    {"seq": 6, "event_type": "node_finished", "node": "ground_claims", "status": "running", "state_version": 7, "created_at": "2026-09-11T00:00:06Z", "node_latency_ms": 4.2},
+    {"seq": 7, "event_type": "node_finished", "node": "critic", "status": "running", "state_version": 8, "created_at": "2026-09-11T00:00:07Z", "node_latency_ms": 320.5},
+    {"seq": 8, "event_type": "node_finished", "node": "risk_gate", "status": "running", "state_version": 9, "created_at": "2026-09-11T00:00:08Z", "node_latency_ms": 2.0},
+    {"seq": 9, "event_type": "node_finished", "node": "finalize", "status": "complete", "state_version": 10, "created_at": "2026-09-11T00:00:09Z", "node_latency_ms": 1.0}
+  ],
+  "states": {
+    "final": {
+      "schema_version": "2.0",
+      "run_id": "replay-normal-run",
+      "trace_id": "replay-normal-trace",
+      "thread_id": "replay:normal",
+      "tenant_id": "demo",
+      "project_id": "demo",
+      "status": "complete",
+      "current_node": "done",
+      "state_version": 10,
+      "response": {
+        "schema_version": "2.0",
+        "case_id": "demo-normal-001",
+        "executive_summary": "建议先以公有云 API 和企业知识库完成设备维修问答 POC，再根据目标硬件压测结果决定是否切换本地推理。",
+        "requirements": [
+          {"name": "部署方式", "value": "公有云 API", "priority": "must", "source": "customer_brief"},
+          {"name": "峰值并发", "value": "5", "priority": "must", "source": "customer_brief"},
+          {"name": "完整答案时延", "value": "10000 ms", "priority": "should", "source": "customer_brief"}
+        ],
+        "claims": [
+          {"claim_id": "claim-normal-1", "text": "公有云 API 适合先验证业务价值。", "claim_type": "fact", "support_status": "supported", "evidence_ids": ["demo-knowledge:1"], "confidence": 0.92},
+          {"claim_id": "claim-normal-2", "text": "是否切换本地部署需要通过目标硬件压测确认。", "claim_type": "recommendation", "support_status": "supported", "evidence_ids": [], "confidence": 0.88}
+        ],
+        "recommendations": ["采用 RAG-first 方案接入维修手册和历史工单。", "以 5 并发和 10 秒完整答案作为 POC 压测门槛。"],
+        "architecture": ["文档解析与分块", "关键词/向量检索与权限过滤", "OpenAI-compatible 模型服务", "引用和风险审核层"],
+        "implementation_steps": ["准备脱敏维修资料", "建立带来源定位的知识索引", "执行黄金问题集和容量压测", "根据结果确定生产部署路径"],
+        "risks": [{"category": "容量", "description": "POC 指标不能直接等同于生产容量。", "severity": "low", "action": "在目标硬件和目标模型上复测。"}],
+        "clarifying_questions": [],
+        "evidence": [{"evidence_id": "demo-knowledge:1", "source_id": "inference-deployment", "title": "本地推理服务选型资料", "version": "v1", "license": "synthetic", "excerpt": "云端 API 适合快速上线或请求量弹性变化的场景，本地模型适合数据不能出域或需要固定版本的场景。", "page": 1, "locator": "heading=本地推理服务选型资料", "content_hash": "sha256:demo-knowledge-1", "tenant_id": "public", "acl": [], "retrieval_only": true, "training_allowed": false, "relevance": 0.94}],
+        "poc_plan": [{"phase": "资料与检索基线", "objective": "验证维修资料可被正确召回。", "activities": ["解析 PDF", "建立黄金问题集"], "deliverables": ["检索评测报告"], "exit_criteria": "关键问题能够返回来源片段。"}],
+        "model_strategy": {"primary_serving_path": "cloud_api", "retrieval_strategy": {"keyword": true, "vector_reserved": true, "top_k": 4}, "fine_tuning_strategy": {"enabled": false, "reason": "先验证 RAG baseline"}, "selection_rationale": "数据允许出域且当前目标是快速验证。"},
+        "assumptions": ["维修资料已经完成脱敏。", "5 并发是峰值而不是生产容量承诺。"],
+        "review": {"required": false, "status": "not_required", "state_version": 10},
+        "provenance": {"run_id": "replay-normal-run", "trace_id": "replay-normal-trace", "thread_id": "replay:normal", "model_name": "qwen3-8b-q4", "model_hash": "sha256:demo-normal", "prompt_version": "v2-local-model-presales-graph-2026-09-09", "schema_version": "2.0", "knowledge_snapshot_id": "repository-knowledge-v1", "model_quantization": "Q4_K_M", "context_length": 8192, "llama_cpp_commit": "demo-capture", "sampling_params": {"temperature": 0}, "generated_at": "2026-09-11T00:00:09Z"},
+        "quality": {"parse_pass": true, "schema_pass": true, "evidence_coverage": 1.0, "citation_precision": 1.0, "repair_attempts": 0, "structured_retries": 0, "citation_recall": 1.0, "latency_ms": 2040.0, "ttft_ms": 280.0, "prompt_tokens": 1200, "completion_tokens": 700, "total_tokens": 1900}
+      },
+      "review": {"required": false, "status": "not_required", "state_version": 10},
+      "errors": [],
+      "error_code": null,
+      "feedback": [],
+      "created_at": "2026-09-11T00:00:00Z",
+      "clarify": {"missing_fields": [], "questions": []}
+    }
+  }
+}

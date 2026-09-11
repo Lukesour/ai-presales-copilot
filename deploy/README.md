@@ -6,7 +6,9 @@
 
 ```bash
 cp .env.example .env
-# 把已校验的 Qwen3-8B GGUF Q4 文件放进 ./models/
+# 下载模型并把脚本输出的 SHA-256 填入 .env（需要 hf 或 huggingface-cli）
+MODEL_DIR=models MODEL_FILE=Qwen3-8B-Q4_K_M.gguf ./scripts/download_model.sh
+# 或把已校验的 Qwen3-8B GGUF Q4 文件放进 ./models/
 docker compose -f deploy/compose.agent.yaml up --build
 curl http://127.0.0.1:8090/healthz
 curl http://127.0.0.1:8090/readyz
@@ -16,6 +18,18 @@ curl http://127.0.0.1:8090/readyz
 
 ```bash
 docker compose --profile ingest -f deploy/compose.agent.yaml run --rm presales-ingest
+docker compose -f deploy/compose.agent.yaml restart presales-api
+```
+
+撤回资料时同时更新 PostgreSQL 和知识卷；更新后重启 API 使本地镜像重新加载：
+
+```bash
+docker compose --profile ingest -f deploy/compose.agent.yaml run --rm \
+  --entrypoint python presales-ingest scripts/revoke_source.py \
+  --source-id <source-id> \
+  --postgres-dsn postgresql://presales:presales@postgres:5432/presales \
+  --chunks /var/lib/ai-presales/knowledge/chunks.jsonl \
+  --manifest /var/lib/ai-presales/knowledge/manifest.jsonl
 docker compose -f deploy/compose.agent.yaml restart presales-api
 ```
 

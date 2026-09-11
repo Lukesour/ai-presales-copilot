@@ -52,3 +52,17 @@ llamafactory-cli train configs/finetune/llamafactory_qwen25_lora_sft.yaml
 ```
 
 训练后必须在 `test.jsonl` 和独立安全集上比较 base 与 adapter，不以训练 loss 单独判断上线。adapter 和训练输出写入被 Git 忽略的 `.runtime/`，不提交大模型文件。
+## Self-QA candidate filtering
+
+Use the repository corpus by default so evidence references are checked against
+real IDs. Add an ingested chunks manifest when evaluating versioned sources:
+
+```bash
+PYTHONPATH=src python scripts/build_self_qa.py \
+  --input data/finetuning/train.jsonl \
+  --chunks .runtime/knowledge/chunks.jsonl
+```
+
+Samples with unknown evidence IDs, invalid JSON/schema, PII, or instruction-like
+content stay in the rejected layer. `--approved-id` is the only path that can
+promote a filtered candidate to `expert_verified_gold`.

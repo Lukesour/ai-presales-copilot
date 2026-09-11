@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -251,16 +252,15 @@ class CustomerBriefV2(StrictModel):
 
     @classmethod
     def from_legacy(cls, brief: CustomerBrief) -> CustomerBriefV2:
+        capacity = _legacy_capacity(brief.concurrency)
+        latency = _legacy_latency(brief.latency_requirement)
         return cls(
             case_id=brief.case_id,
             industry=brief.industry,
             use_case=brief.use_case,
             data_types=brief.data_types,
             deployment=brief.deployment,
-            capacity=CapacityRequirements(
-                peak_concurrency=_extract_int(brief.concurrency),
-                full_answer_target_ms=_extract_int(brief.latency_requirement),
-            ),
+            capacity=CapacityRequirements(**capacity, **latency),
             governance=DataGovernanceRequirements(
                 residency=";".join(brief.compliance) if brief.compliance else None,
                 egress_allowed=False if "数据不能出域" in brief.compliance else None,
@@ -458,7 +458,38 @@ class SolutionDraftV2(StrictModel):
 
 
 def _extract_int(value: str) -> int | None:
-    import re
-
     match = re.search(r"(\d+)", value or "")
     return int(match.group(1)) if match else None
+
+
+def _legacy_capacity(value: str) -> dict[str, int]:
+    """Map legacy free text to explicit v2 volume fields without guessing units."""
+
+    source = value or ""
+    quantity = _extract_int(source)
+    if quantity is None:
+        return {}
+    if re.search(r"日请求|daily", source, re.IGNORECASE):
+        return {"daily_requests": quantity}
+    peak = re.search(r"(?:峰值|peak)\s*[:：]?\s*(\d+)", source, re.IGNORECASE)
+    if peak:
+        return {"peak_concurrency": int(peak.group(1))}
+    return {"peak_concurrency": quantity}
+
+
+def _legacy_latency(value: str) -> dict[str, int]:
+    """Convert legacy seconds/milliseconds text to the matching v2 target."""
+
+    source = value or ""
+    number = re.search(r"(\d+(?:\.\d+)?)\s*(毫秒|ms|秒|s|分钟|分)?", source, re.IGNORECASE)
+    if not number:
+        return {}
+    amount = float(number.group(1))
+    unit = (number.group(2) or "秒").lower()
+    multiplier = 60_000 if unit in {"分钟", "分"} else 1_000
+    if unit in {"毫秒", "ms"}:
+        multiplier = 1
+    target_ms = int(amount * multiplier)
+    if re.search(r"首\s*token|首字|ttft", source, re.IGNORECASE):
+        return {"ttft_target_ms": target_ms}
+    return {"full_answer_target_ms": target_ms}

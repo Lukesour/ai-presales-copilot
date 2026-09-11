@@ -174,8 +174,9 @@ def fetch_registered_url(
     if not robots.can_fetch(user_agent, spec.source_url):
         raise IngestionRejected("robots.txt does not allow this user agent")
     request = urllib.request.Request(spec.source_url, headers={"User-Agent": user_agent})
+    opener = urllib.request.build_opener(_AllowlistedRedirectHandler(spec.allowed_domains))
     try:
-        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+        with opener.open(request, timeout=timeout_s) as response:
             content_type = response.headers.get_content_type()
             body = response.read(max_bytes + 1)
     except (urllib.error.URLError, TimeoutError) as exc:
@@ -183,6 +184,18 @@ def fetch_registered_url(
     if len(body) > max_bytes:
         raise IngestionRejected("source exceeds the configured size limit")
     return body, content_type
+
+
+class _AllowlistedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-apply the source boundary to every HTTP redirect target."""
+
+    def __init__(self, allowed_domains: Iterable[str]):
+        super().__init__()
+        self.allowed_domains = tuple(allowed_domains)
+
+    def redirect_request(self, req, fp, code, msg, newurl, headers, method=None):
+        assert_allowed_url(newurl, self.allowed_domains)
+        return super().redirect_request(req, fp, code, msg, newurl, headers, method)
 
 
 def ingest_source(

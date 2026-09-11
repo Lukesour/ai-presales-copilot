@@ -453,7 +453,7 @@ class LocalModelWorkflow:
         brief = CustomerBriefV2.model_validate(state["brief"])
         draft = SolutionDraftV2.model_validate(state["draft"])
         evidence = [EvidenceChunkV2.model_validate(item) for item in state.get("evidence", [])]
-        repaired = self._repair(brief, draft, evidence, state.get("critic", {}))
+        repaired = self._repair(brief, draft, evidence, state.get("critic", {}), state)
         state["repair_attempts"] = int(state.get("repair_attempts", 0)) + 1
         grounded, risks = self._ground(repaired, evidence)
         state["draft"] = grounded.model_dump(mode="json")
@@ -601,7 +601,7 @@ class LocalModelWorkflow:
 
         if critic.get("issues") and state.get("repair_attempts", 0) < self.max_repair_attempts:
             self._set_node(state, "repair")
-            repaired = self._repair(brief, grounded, evidence, critic)
+            repaired = self._repair(brief, grounded, evidence, critic, state)
             state["repair_attempts"] = int(state.get("repair_attempts", 0)) + 1
             grounded, repair_risks = self._ground(repaired, evidence)
             state["draft"] = grounded.model_dump(mode="json")
@@ -710,9 +710,15 @@ class LocalModelWorkflow:
                     tenant_id=state.get("tenant_id", "local"),
                     roles=state.get("roles", []),
                 )
-            # Keep the repository corpus as a safe bootstrap fallback until
-            # the optional ingestion profile has populated pgvector.
-            candidates = indexed or self.knowledge_base.search(
+            # Keep the repository corpus as a bootstrap fallback only while
+            # the SQL index has no sources at all. Once it contains sources,
+            # an empty result is authoritative: falling back here after an
+            # ACL/revocation miss could re-introduce protected local chunks.
+            index_authoritative = bool(
+                self.knowledge_index is not None
+                and getattr(self.knowledge_index, "has_sources", lambda: False)()
+            )
+            candidates = indexed if index_authoritative or indexed else self.knowledge_base.search(
                 query,
                 top_k=4,
                 tenant_id=state.get("tenant_id", "local"),
@@ -794,7 +800,7 @@ class LocalModelWorkflow:
             raise LLMWorkflowError(f"draft schema validation failed: {exc}") from exc
         if draft.case_id != brief.case_id:
             raise LLMWorkflowError("draft case_id does not match the request")
-        return draft
+        return self._sanitize_generated_draft(draft, state)
 
     def _ground(
         self, draft: SolutionDraftV2, evidence: list[EvidenceChunkV2]
@@ -910,6 +916,7 @@ class LocalModelWorkflow:
         draft: SolutionDraftV2,
         evidence: list[EvidenceChunkV2],
         critic: dict[str, Any],
+        state: dict[str, Any],
     ) -> SolutionDraftV2:
         prompt = (
             "修复下面方案审查发现的问题，保持证据不足时保守回答，只输出完整 JSON。\n"
@@ -945,9 +952,37 @@ class LocalModelWorkflow:
         payload.setdefault("schema_version", "2.0")
         payload.setdefault("case_id", brief.case_id)
         try:
-            return SolutionDraftV2.model_validate(payload)
+            repaired = SolutionDraftV2.model_validate(payload)
         except Exception as exc:
             raise LLMWorkflowError(f"repair schema validation failed: {exc}") from exc
+        return self._sanitize_generated_draft(repaired, state)
+
+    def _sanitize_generated_draft(
+        self,
+        draft: SolutionDraftV2,
+        state: dict[str, Any],
+    ) -> SolutionDraftV2:
+        """Redact sensitive model text before it reaches a checkpoint or API.
+
+        The raw model response is validated in memory, but generated fields
+        must not be persisted merely because the run is going to human review.
+        The risk is still recorded so reviewers know why the answer was held.
+        """
+
+        payload = draft.model_dump(mode="json")
+        policy = inspect_sensitive_data(json.dumps(payload, ensure_ascii=False))
+        if not policy.blocked:
+            return draft
+        state.setdefault("risks", []).append(
+            {
+                "category": "敏感数据",
+                "description": "模型草案包含疑似个人信息或凭证，已在持久化前脱敏。",
+                "severity": "high",
+                "action": "人工复核脱敏结果并确认是否可以交付。",
+            }
+        )
+        sanitized = redact(payload)
+        return SolutionDraftV2.model_validate(sanitized)
 
     def _build_response(
         self,

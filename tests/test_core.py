@@ -1,11 +1,13 @@
+import json
 from pathlib import Path
 from typing import Self
 
 import pytest
 
+from ai_presales_copilot.dataset_pipeline import filter_candidates
 from ai_presales_copilot.dify_client import DifyClient, DifyClientError
 from ai_presales_copilot.knowledge import KnowledgeBase
-from ai_presales_copilot.llama_client import LlamaClient
+from ai_presales_copilot.llama_client import LlamaClient, _inline_local_refs
 from ai_presales_copilot.observability import redact
 from ai_presales_copilot.offline_engine import OfflineSolutionEngine
 from ai_presales_copilot.schemas import CustomerBrief, validate_solution_dict
@@ -14,6 +16,7 @@ from ai_presales_copilot.security import (
     inspect_sensitive_data,
     inspect_untrusted_input,
 )
+from scripts.serve_agent import _verified_model_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -137,6 +140,35 @@ def test_llama_client_parses_openai_json_and_sse(monkeypatch: pytest.MonkeyPatch
     assert streamed.time_to_first_token_ms is not None
 
 
+def test_llama_client_sends_schema_constrained_response_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(request, **_kwargs):
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return _FakeHTTPResponse(b'{"model":"fake","choices":[{"message":{"content":"{}"}}]}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
+    LlamaClient("http://fake").chat(
+        [{"role": "user", "content": "hello"}], response_schema=schema
+    )
+    assert captured["response_format"] == {"type": "json_schema", "schema": schema}
+    assert captured["json_schema"] == schema
+
+
+def test_llama_schema_inlines_local_pydantic_references() -> None:
+    schema = {
+        "type": "object",
+        "$defs": {"item": {"type": "string", "minLength": 1}},
+        "properties": {"value": {"$ref": "#/$defs/item"}},
+    }
+    expanded = _inline_local_refs(schema)
+    assert "$defs" not in expanded
+    assert expanded["properties"]["value"] == {"type": "string", "minLength": 1}
+
+
 def test_dify_client_parses_structured_answer() -> None:
     brief = CustomerBrief("case", "行业", "场景")
     payload = {
@@ -154,3 +186,43 @@ def test_security_policies_cover_injection_commitment_and_sensitive_data() -> No
     redacted = redact("Authorization: Bearer secret-value; 联系人 13812345678")
     assert "secret-value" not in redacted
     assert "13812345678" not in redacted
+
+
+def test_self_qa_rejects_unknown_evidence_reference() -> None:
+    records = [
+        {
+            "id": "candidate-1",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {
+                            "case_id": "case-1",
+                            "executive_summary": "summary",
+                            "evidence": [
+                                {
+                                    "evidence_id": "KB-999",
+                                    "title": "unknown",
+                                    "excerpt": "text",
+                                    "source_path": "missing.md",
+                                }
+                            ],
+                        }
+                    ),
+                }
+            ],
+        }
+    ]
+    accepted, rejected, decisions = filter_candidates(records, evidence_ids={"KB-001"})
+    assert accepted == []
+    assert len(rejected) == 1
+    assert "unknown_evidence_reference" in decisions[0].reasons
+
+
+def test_model_hash_verification_fails_closed_for_missing_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    missing = tmp_path / "missing.gguf"
+    monkeypatch.setenv("LLAMA_MODEL_SHA256", "deadbeef")
+    with pytest.raises(SystemExit, match="does not exist"):
+        _verified_model_hash(str(missing))

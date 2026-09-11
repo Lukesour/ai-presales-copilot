@@ -1,18 +1,21 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:${PATH}"
 
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
 COPY data/knowledge ./data/knowledge
 COPY scripts/serve_agent.py ./scripts/serve_agent.py
 COPY scripts/ingest_sources.py ./scripts/ingest_sources.py
+COPY scripts/revoke_source.py ./scripts/revoke_source.py
 COPY alembic.ini ./alembic.ini
 COPY migrations ./migrations
 
-RUN pip install --no-cache-dir '.[runtime,knowledge]' \
+RUN pip install --no-cache-dir 'uv==0.12.11' \
+    && uv sync --locked --no-dev --extra runtime --extra knowledge \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin app \
     && mkdir -p /var/lib/ai-presales \
     && chown -R app:app /app /var/lib/ai-presales

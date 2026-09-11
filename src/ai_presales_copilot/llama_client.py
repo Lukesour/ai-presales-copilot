@@ -65,14 +65,16 @@ class LlamaClient:
             "stream": False,
         }
         if response_schema is not None:
-            # llama-server consumes the direct json_schema field; the
-            # response_format wrapper keeps the request compatible with
-            # OpenAI-style gateways without relying on a non-standard nested
-            # schema shape. The caller still validates the body after HTTP
-            # 200 because structured output can be violated by some model/
-            # server combinations.
-            payload["response_format"] = {"type": "json_object"}
-            payload["json_schema"] = response_schema
+            wire_schema = _inline_local_refs(response_schema)
+            # Current llama-server accepts schema-constrained output through
+            # the OpenAI-compatible response_format shape.  Keep the direct
+            # json_schema option too: it is understood by older server builds
+            # and makes the request portable to the native completion layer.
+            # The caller still validates the body after HTTP 200 because some
+            # model/server combinations can return a successful but invalid
+            # structured response.
+            payload["response_format"] = {"type": "json_schema", "schema": wire_schema}
+            payload["json_schema"] = wire_schema
         started = time.perf_counter()
         body = self._post("/v1/chat/completions", payload)
         latency_ms = (time.perf_counter() - started) * 1000
@@ -104,8 +106,9 @@ class LlamaClient:
             "stream_options": {"include_usage": True},
         }
         if response_schema is not None:
-            payload["response_format"] = {"type": "json_object"}
-            payload["json_schema"] = response_schema
+            wire_schema = _inline_local_refs(response_schema)
+            payload["response_format"] = {"type": "json_schema", "schema": wire_schema}
+            payload["json_schema"] = wire_schema
         started = time.perf_counter()
         first_token_at: float | None = None
         chunks: list[str] = []
@@ -174,3 +177,42 @@ class LlamaClient:
             raise LlamaClientError(f"llama.cpp streaming HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise LlamaClientError(f"llama.cpp streaming request failed: {exc}") from exc
+
+
+def _inline_local_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Expand Pydantic's local ``$defs`` references for llama.cpp grammar.
+
+    Pydantic's JSON Schema is excellent for API validation but commonly uses
+    ``$defs``/``$ref``.  llama.cpp's schema-to-grammar path is more portable
+    when it receives one self-contained schema, so only local references are
+    expanded; external references remain untouched and will be rejected by
+    the model boundary's normal post-response validation.
+    """
+
+    definitions = schema.get("$defs", {})
+
+    def expand(value: Any, stack: tuple[str, ...] = ()) -> Any:
+        if isinstance(value, list):
+            return [expand(item, stack) for item in value]
+        if not isinstance(value, dict):
+            return value
+        reference = value.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#/$defs/"):
+            name = reference.removeprefix("#/$defs/")
+            if name in stack:
+                return {"type": "object"}
+            target = definitions.get(name)
+            if isinstance(target, dict):
+                expanded = expand(target, (*stack, name))
+                siblings = {key: item for key, item in value.items() if key != "$ref"}
+                if siblings and isinstance(expanded, dict):
+                    expanded = {**expanded, **expand(siblings, stack)}
+                return expanded
+        return {
+            key: expand(item, stack)
+            for key, item in value.items()
+            if key != "$defs"
+        }
+
+    expanded_schema = expand(schema)
+    return expanded_schema if isinstance(expanded_schema, dict) else dict(schema)

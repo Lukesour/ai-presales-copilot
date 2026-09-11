@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the local-model FastAPI service (or the legacy demo explicitly)."""
+"""Start the versioned local-model FastAPI service."""
 
 from __future__ import annotations
 
@@ -8,13 +8,11 @@ import hashlib
 import os
 from pathlib import Path
 
-from ai_presales_copilot.agent import PresalesAgent
-from ai_presales_copilot.api import AgentHTTPService, create_server
 from ai_presales_copilot.api_v2 import LocalTokenAuth, create_fastapi_app
 from ai_presales_copilot.knowledge import KnowledgeBase
 from ai_presales_copilot.llama_client import LlamaClient
 from ai_presales_copilot.llm_agent import LocalModelWorkflow
-from ai_presales_copilot.persistence import CheckpointStore, create_checkpoint_store
+from ai_presales_copilot.persistence import create_checkpoint_store
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,10 +21,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8090)
-    parser.add_argument(
-        "--mode", choices=("local-model", "legacy"), default="local-model",
-        help="local-model is the v2 API; legacy keeps the original deterministic fixture",
-    )
     parser.add_argument("--db", default=os.getenv("CHECKPOINT_DB", str(ROOT / ".runtime/agent/checkpoints.db")))
     parser.add_argument("--llama-url", default=os.getenv("LLAMA_BASE_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--model", default=os.getenv("LLAMA_MODEL", "qwen3-8b-q4"))
@@ -41,26 +35,13 @@ def main() -> int:
         ROOT / "data/knowledge",
         chunks_path=os.getenv("KNOWLEDGE_CHUNKS") or None,
     )
-    if args.mode == "legacy":
-        with CheckpointStore(args.db) as store:
-            service = AgentHTTPService(PresalesAgent(knowledge, store))
-            server = create_server(args.host, args.port, service)
-            print(f"Legacy Agent API listening on http://{args.host}:{args.port}")
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                print("\nStopping Agent API")
-            finally:
-                server.server_close()
-        return 0
-
+    model_hash = _verified_model_hash(args.model_path)
     store = create_checkpoint_store(args.db)
     model = LlamaClient(
         args.llama_url,
         args.model,
         timeout_s=float(os.getenv("LLAMA_TIMEOUT_S", "120")),
     )
-    model_hash = os.getenv("LLAMA_MODEL_SHA256") or _sha256_if_file(args.model_path)
     knowledge_index = None
     if str(args.db).startswith(("postgres://", "postgresql://")):
         from ai_presales_copilot.knowledge_store import PostgresKnowledgeIndex
@@ -107,6 +88,21 @@ def _sha256_if_file(value: str) -> str | None:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _verified_model_hash(model_path: str) -> str | None:
+    """Return the model digest and fail closed when a configured hash differs."""
+
+    expected = os.getenv("LLAMA_MODEL_SHA256", "").strip().lower() or None
+    if model_path and not Path(model_path).is_file():
+        raise SystemExit(f"LLAMA_MODEL_PATH does not exist: {model_path}")
+    actual = _sha256_if_file(model_path)
+    if expected and actual and expected != actual.lower():
+        raise SystemExit(
+            "LLAMA_MODEL_SHA256 does not match LLAMA_MODEL_PATH: "
+            f"expected {expected}, actual {actual}"
+        )
+    return actual or expected
 
 
 if __name__ == "__main__":

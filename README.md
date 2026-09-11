@@ -30,6 +30,7 @@ intake → clarify → query_rewrite → retrieve → draft → ground_claims
 ```text
 src/ai_presales_copilot/  售前 Agent、契约、检索、API、持久化和安全策略
 data/knowledge/           合成产品、部署、安全和检索资料
+data/demo/                三个合成演示案例和脱敏 Replay 快照
 data/evaluation/          客户需求黄金案例
 data/finetuning/          版本化微调数据与 manifest
 dify/                     Dify 工作流说明和响应契约
@@ -85,7 +86,9 @@ PYTHONPATH=src python scripts/run_agent.py \
 ```bash
 cp .env.example .env
 mkdir -p models
-# 将已校验的 Qwen3-8B GGUF Q4 文件放到 models/，文件名与 LLAMA_MODEL_FILE 一致
+# 用脚本下载并输出 hash（需要本机已安装 hf 或 huggingface-cli）
+MODEL_DIR=models MODEL_FILE=Qwen3-8B-Q4_K_M.gguf ./scripts/download_model.sh
+# 或将已校验的 Qwen3-8B GGUF Q4 文件放到 models/，文件名与 LLAMA_MODEL_FILE 一致
 docker compose --env-file .env -f deploy/compose.agent.yaml up --build
 curl -s http://127.0.0.1:8090/healthz
 curl -s http://127.0.0.1:8090/readyz
@@ -125,12 +128,45 @@ uv sync --locked --extra demo
 PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
 ```
 
+Gradio 页面默认使用 `Live API`。页面加载、刷新和每次实时生成前都会检查 `/readyz`；
+如果数据库、知识库或模型未就绪，会阻止创建 run，但不会影响 `Demo Replay`。
+
+无模型或无 API 环境也可以直接运行求职演示：
+
+```bash
+PYTHONPATH=src python scripts/check_demo_replays.py
+PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
+```
+
+页面切换到 `Demo Replay` 后，可展示正常、信息缺失和高风险审核三个合成案例。
+Replay 是静态快照，不访问 API、数据库或模型，也不代表生产模型效果。
+
+重新从可用的正式 API 捕获快照（不会自动覆盖已有文件）：
+
+```bash
+PYTHONPATH=src python scripts/capture_demo_replays.py --api-url http://127.0.0.1:8090
+```
+
+实现细节和三分钟讲解顺序见 [`docs/demo-script.md`](docs/demo-script.md) 和
+[`docs/demo-replay.md`](docs/demo-replay.md)。
+
 来源导入和 Self-QA：
 
 ```bash
 uv run python scripts/ingest_sources.py
 uv run python scripts/build_self_qa.py --input data/finetuning/train.jsonl
 ```
+
+撤回某个已登记资料版本（按 `source_id`，必要时再加 `content_hash`）：
+
+```bash
+PYTHONPATH=src uv run python scripts/revoke_source.py \
+  --source-id repo-product-capability \
+  --chunks .runtime/knowledge/chunks.jsonl \
+  --manifest .runtime/knowledge/manifest.jsonl
+```
+
+Compose 环境请按 [`deploy/README.md`](deploy/README.md) 同时撤回 PostgreSQL 和知识卷。
 
 ## 设计边界
 
