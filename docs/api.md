@@ -6,8 +6,12 @@
 
 ```bash
 PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
+  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 --model qwen3-8b-q4
 ```
+
+`--model` 必须与 llama-server 的 `--alias`（或 `/v1/models` 中的模型 id）一致。若本地启动的是
+`--alias qwen3-1.7b-demo`，请将上面的 `--model` 改为 `qwen3-1.7b-demo`；服务不会静默选择
+第一个可用模型。
 
 `/healthz` 是进程存活检查；`/readyz` 同时检查 checkpoint 数据库、知识索引和 llama-server。模型检查不仅访问 llama-server `/health`，还核对 `/v1/models` 是否包含 API 配置的模型。`/readyz` 返回 200 `{"status":"ready"}` 或 503 `{"status":"not_ready","checks":{...}}`，前者才允许演示页面创建 Live run。失败时 `checks` 会保留安全的 `*_error_code` 和必要诊断；例如 `checkpoint_format_unsupported` 要求保留旧库并使用显式迁移或 clean reset，不会静默转换。业务接口需要 `Authorization: Bearer <token>`。开发 token 还支持 `X-Tenant-ID`、`X-User-ID`、`X-Roles`，共享部署必须替换成 OIDC/JWT 校验器。
 

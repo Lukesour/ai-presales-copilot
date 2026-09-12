@@ -24,9 +24,13 @@ PYTHONPATH=src python scripts/run_security_checks.py
 
 ```bash
 PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
+  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 --model qwen3-8b-q4
 promptfoo redteam run -c security/promptfooconfig.yaml
 ```
+
+本地 llama-server 的 `--alias` 必须与 API 的 `--model` 一致；例如服务若使用
+`--alias qwen3-1.7b-demo`，这里也应改为 `--model qwen3-1.7b-demo`。显式绑定模型身份，
+避免在多模型目录中静默选择错误模型。
 
 配置遵循 [Promptfoo red-team configuration](https://github.com/promptfoo/promptfoo/blob/main/site/docs/red-team/configuration.md) 的 target、purpose、framework、plugin 和 strategy 分层；静态 12 条用例仍由本仓库脚本独立运行，避免把“工具可用”误当成安全结论。
 

@@ -156,6 +156,25 @@ def test_readiness_view_names_the_actual_checkpoint_failure():
     assert "llama-server 未启动" in view["message"]
 
 
+def test_readiness_view_names_the_configured_model_mismatch():
+    view = build_readiness_view(
+        {
+            "status": "not_ready",
+            "checks": {
+                "database": True,
+                "knowledge_index": True,
+                "model": False,
+                "model_error_code": "model_mismatch",
+                "model_configured": "qwen3-8b-q4",
+                "model_available": ["qwen3-1.7b-demo"],
+            },
+        }
+    )
+    assert "qwen3-8b-q4" in view["message"]
+    assert "qwen3-1.7b-demo" in view["message"]
+    assert "--model" in view["message"]
+
+
 def test_replay_approval_is_local_and_does_not_need_api(monkeypatch, scenarios):
     snapshot = load_demo_replay(ROOT / "data/demo/replays", "high_risk", scenarios=scenarios)
     session = new_session()
