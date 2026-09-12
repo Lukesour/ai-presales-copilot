@@ -267,6 +267,20 @@ def build_readiness_view(payload: Mapping[str, Any] | None, *, error: str | None
     }
 
 
+def build_control_state(session: Mapping[str, Any] | None) -> dict[str, bool]:
+    """Project workflow state into safe UI control interactivity flags."""
+
+    data = session or {}
+    state = data.get("public_state") if isinstance(data.get("public_state"), Mapping) else {}
+    status = state.get("status")
+    return {
+        "clarification_interactive": status == "needs_clarification",
+        "confirmation_interactive": status == "ready_for_confirmation",
+        "review_interactive": status == "waiting_for_review",
+        "replay_case_interactive": data.get("mode") == "replay",
+    }
+
+
 def render_mode_banner(mode: str, readiness: Mapping[str, Any] | None = None) -> str:
     if mode == "replay":
         return "### Demo Replay · 静态快照 · 非实时模型调用\n不访问 API、数据库或模型服务。"

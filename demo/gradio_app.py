@@ -18,6 +18,7 @@ from ai_presales_copilot.demo_controller import (
     submit_clarification_session,
 )
 from ai_presales_copilot.demo_replay import load_demo_scenarios
+from ai_presales_copilot.demo_view import build_control_state
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO_PATH = ROOT / "data/demo/scenarios.json"
@@ -41,12 +42,13 @@ def build_app(mode: str = "api"):
     initial_session = select_mode(new_session(), "replay", replay_case, scenarios, str(REPLAY_DIR), api_url, token)
 
     def control_updates(session):
-        status = (session.get("public_state") or {}).get("status")
+        controls = build_control_state(session)
         return (
-            gr.update(interactive=status == "needs_clarification"),
-            gr.update(interactive=status == "ready_for_confirmation"),
-            gr.update(interactive=status == "waiting_for_review"),
-            gr.update(interactive=status == "waiting_for_review"),
+            gr.update(interactive=controls["clarification_interactive"]),
+            gr.update(interactive=controls["confirmation_interactive"]),
+            gr.update(interactive=controls["review_interactive"]),
+            gr.update(interactive=controls["review_interactive"]),
+            gr.update(interactive=controls["replay_case_interactive"]),
         )
 
     def update(session):
@@ -59,6 +61,12 @@ def build_app(mode: str = "api"):
         current = session or new_session()
         current["raw_request"] = raw_request or current.get("raw_request", "")
         return update(select_mode(current, selected, current.get("scenario_id", replay_case), scenarios, str(REPLAY_DIR), api_url, token))
+
+    def on_replay_case(selected_case, raw_request, session):
+        current = session or new_session()
+        current["raw_request"] = raw_request or current.get("raw_request", "")
+        case_id = selected_case if selected_case in scenarios else replay_case
+        return update(select_mode(current, "replay", case_id, scenarios, str(REPLAY_DIR), api_url, token))
 
     def on_analyze(selected_mode, raw_request, session):
         current = session or new_session()
@@ -92,6 +100,12 @@ def build_app(mode: str = "api"):
                 [("Demo Replay（默认离线）", "replay"), ("Live API", "live")],
                 value="replay",
                 label="运行模式",
+            )
+            replay_case_picker = gr.Dropdown(
+                choices=list(scenarios),
+                value=replay_case,
+                label="Replay 场景（仅 Replay）",
+                info="选择 missing_then_clarified 可演示‘提交补充信息’分支。",
             )
         raw_input = gr.Textbox(
             value=initial_session.get("raw_request", ""),
@@ -165,10 +179,12 @@ def build_app(mode: str = "api"):
             implementation, poc, model_strategy, assumptions, clarifications,
             claim_evidence, evidence, risks, review, timeline, metadata, raw,
             clarify_button, confirm_button, approve, reject,
+            replay_case_picker,
         ]
         analyze_button.click(on_analyze, [mode_picker, raw_input, session_state], outputs)
         refresh_button.click(on_refresh, [session_state], outputs)
         mode_picker.change(on_mode, [mode_picker, raw_input, session_state], outputs)
+        replay_case_picker.change(on_replay_case, [replay_case_picker, raw_input, session_state], outputs)
         clarify_button.click(on_clarify, [clarification_input, session_state], outputs)
         confirm_button.click(on_confirm, [session_state], outputs)
         approve.click(lambda session: on_decide("approve", session), [session_state], outputs)

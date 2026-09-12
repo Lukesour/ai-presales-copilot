@@ -33,7 +33,7 @@ PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
 
 “售前方案不能从预填 Brief 或辅助示例开始。我先粘贴客户原始需求，让系统判断现在是否具备做方案的条件。”
 
-展示大文本框和“分析需求”。强调：Replay 中的文本是仓库登记的合成输入，不是固定模板伪造；Live 使用 `/v2/projects/{project_id}/runs` 创建真实需求分析 run。页面没有场景下拉框或“辅助示例（非正式输入入口）”区。
+展示大文本框和“分析需求”。强调：Replay 中的文本是仓库登记的合成输入，不是固定模板伪造；Live 使用 `/v2/projects/{project_id}/runs` 创建真实需求分析 run。Replay 场景选择器只用于切换登记快照，不会把辅助示例伪装成正式输入入口。
 
 ## 0:20–0:50：需求解析和缺口分析
 
@@ -47,7 +47,7 @@ PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
 
 ## 0:50–1:20：补充信息和需求确认
 
-若需要展示缺失分支，重新启动页面前设置 `PRESALES_REPLAY_CASE=missing_then_clarified`，再提交澄清回答，展示：
+在 Replay 场景选择器中选择 `missing_then_clarified`，点击“分析需求”后即可提交澄清回答，展示：
 
 ```text
 initial_input → extracted_requirements → needs_clarification

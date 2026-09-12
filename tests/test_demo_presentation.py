@@ -6,7 +6,9 @@ import pytest
 
 from ai_presales_copilot.demo_controller import (
     apply_replay_decision,
+    build_ui_values,
     new_session,
+    select_mode,
 )
 from ai_presales_copilot.demo_replay import (
     DEMO_SCENARIO_IDS,
@@ -16,6 +18,7 @@ from ai_presales_copilot.demo_replay import (
 )
 from ai_presales_copilot.demo_view import (
     build_claim_evidence_rows,
+    build_control_state,
     build_readiness_view,
     build_solution_view,
     build_timeline_rows,
@@ -173,6 +176,33 @@ def test_readiness_view_names_the_configured_model_mismatch():
     assert "qwen3-8b-q4" in view["message"]
     assert "qwen3-1.7b-demo" in view["message"]
     assert "--model" in view["message"]
+
+
+def test_replay_clarification_scenario_enables_the_submission_control(scenarios):
+    session = select_mode(
+        new_session(),
+        "replay",
+        "missing_then_clarified",
+        scenarios,
+        str(ROOT / "data/demo/replays"),
+        "http://unused",
+        "token",
+    )
+    controls = build_control_state(session)
+    assert session["public_state"]["status"] == "needs_clarification"
+    assert controls["clarification_interactive"] is True
+    assert controls["confirmation_interactive"] is False
+    assert controls["replay_case_interactive"] is True
+
+
+def test_ready_for_confirmation_explains_why_clarification_is_disabled():
+    session = {
+        "mode": "replay",
+        "public_state": {"status": "ready_for_confirmation"},
+        "readiness": {"status": "skipped", "checks": {}},
+    }
+    values = build_ui_values(session, {})
+    assert "当前没有待澄清阻断字段" in values["banner"]
 
 
 def test_replay_approval_is_local_and_does_not_need_api(monkeypatch, scenarios):

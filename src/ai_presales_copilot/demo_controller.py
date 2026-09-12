@@ -185,9 +185,9 @@ def build_ui_values(session: Mapping[str, Any], scenarios: Mapping[str, Any]) ->
         banner += f"\n\n{html.escape(str(session['message']))}"
     status = state.get("status")
     if status == "needs_clarification":
-        banner += "\n\n**下一步：** 补充缺失的关键需求，方案生成已阻断。"
+        banner += "\n\n**下一步：** 补充缺失的关键需求，方案生成已阻断；此时可提交补充信息。"
     elif status == "ready_for_confirmation":
-        banner += "\n\n**下一步：** 确认需求和警告项假设后，才会进入检索与方案生成。"
+        banner += "\n\n**下一步：** 确认需求和警告项假设后，才会进入检索与方案生成；当前没有待澄清阻断字段，提交补充信息按钮保持禁用。"
     elif status in {"complete", "waiting_for_review"}:
         banner += "\n\n**方案阶段：** 已通过需求确认门，当前展示可追溯方案或审核状态。"
     replay = session.get("replay_snapshot") or {}
