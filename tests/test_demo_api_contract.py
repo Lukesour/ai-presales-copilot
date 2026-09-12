@@ -45,3 +45,25 @@ def test_readyz_reports_dependencies_and_healthz_stays_process_only():
         assert broken_client.get("/readyz").status_code == 503
         assert broken_client.get("/readyz").json()["checks"]["model"] is False
         assert broken_client.get("/healthz").status_code == 200
+
+
+def test_readyz_explains_legacy_checkpoint_format_without_claiming_model_failure():
+    with CheckpointStore(":memory:") as store:
+        store.connection.execute(
+            "INSERT INTO agent_checkpoints(thread_id, state_json, updated_at, state_version) "
+            "VALUES (?, ?, datetime('now'), ?)",
+            ("legacy-thread", '{"run_id":"legacy-run","status":"complete"}', 1),
+        )
+        store.connection.commit()
+        app = create_fastapi_app(
+            SimpleNamespace(model=HealthyModel()),
+            store,
+            KnowledgeBase("data/knowledge"),
+        )
+        response = TestClient(app).get("/readyz")
+
+    assert response.status_code == 503
+    checks = response.json()["checks"]
+    assert checks["database"] is False
+    assert checks["database_error_code"] == "checkpoint_format_unsupported"
+    assert checks["model"] is True

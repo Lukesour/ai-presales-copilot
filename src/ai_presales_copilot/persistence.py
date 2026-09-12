@@ -11,6 +11,7 @@ from typing import Any, Self
 
 CHECKPOINT_FORMAT = "requirements-first-v2"
 CHECKPOINT_FORMAT_VERSION = 1
+DEFAULT_CHECKPOINT_DB = ".runtime/agent/checkpoints-v2.db"
 
 
 class CheckpointConflictError(RuntimeError):
@@ -24,12 +25,14 @@ class CheckpointFormatError(RuntimeError):
 class CheckpointStore:
     """Persist the latest JSON-serializable state for each Agent thread."""
 
-    def __init__(self, path: str | Path = ".runtime/agent/checkpoints.db"):
+    def __init__(self, path: str | Path = DEFAULT_CHECKPOINT_DB):
         self.path = str(path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.path, check_same_thread=False)
         self._lock = threading.RLock()
+        self._format_check_done = False
+        self._format_error: CheckpointFormatError | None = None
         self.connection.execute("PRAGMA busy_timeout = 5000")
         if self.path != ":memory:":
             self.connection.execute("PRAGMA journal_mode = WAL")
@@ -64,6 +67,27 @@ class CheckpointStore:
         )
         self.connection.commit()
 
+    def check_readiness(self) -> None:
+        """Validate connectivity and persisted payload formats once per process."""
+
+        with self._lock:
+            self.connection.execute("SELECT 1").fetchone()
+            if self._format_check_done:
+                if self._format_error is not None:
+                    raise self._format_error
+                return
+            rows = self.connection.execute(
+                "SELECT state_json FROM agent_checkpoints ORDER BY updated_at DESC"
+            ).fetchall()
+            try:
+                for (payload,) in rows:
+                    _decode_checkpoint_payload(payload)
+            except CheckpointFormatError as exc:
+                self._format_error = exc
+                self._format_check_done = True
+                raise
+            self._format_check_done = True
+
     def save(
         self,
         thread_id: str,
@@ -71,6 +95,7 @@ class CheckpointStore:
         *,
         expected_version: int | None = None,
     ) -> int:
+        self.check_readiness()
         with self._lock:
             row = self.connection.execute(
                 "SELECT state_version FROM agent_checkpoints WHERE thread_id = ?", (thread_id,)
@@ -112,7 +137,7 @@ class CheckpointStore:
             ).fetchone()
         if row is None:
             return None
-        return _validate_checkpoint_payload(json.loads(row[0]))
+        return _decode_checkpoint_payload(row[0])
 
     def load_by_run_id(self, run_id: str) -> dict[str, Any] | None:
         """Find a checkpoint by its public run id.
@@ -127,7 +152,7 @@ class CheckpointStore:
                 "SELECT state_json FROM agent_checkpoints ORDER BY updated_at DESC"
             ).fetchall()
         for (payload,) in rows:
-            state = _validate_checkpoint_payload(json.loads(payload))
+            state = _decode_checkpoint_payload(payload)
             if state.get("run_id") == run_id:
                 return state
         return None
@@ -196,6 +221,8 @@ class PostgresCheckpointStore:
             raise RuntimeError("Install the runtime extra to use PostgreSQL checkpoints") from exc
         self.connection = psycopg.connect(dsn, autocommit=True, connect_timeout=10)
         self._lock = threading.RLock()
+        self._format_check_done = False
+        self._format_error: CheckpointFormatError | None = None
         self.native_graph_checkpointer = None
         self._native_graph_connection = None
         with self.connection.cursor() as cursor:
@@ -242,6 +269,28 @@ class PostgresCheckpointStore:
             # The native saver is optional for the SQLite/dependency-light path.
             self.native_graph_checkpointer = None
 
+    def check_readiness(self) -> None:
+        """Validate connectivity and persisted payload formats once per process."""
+
+        with self._lock:
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+                if self._format_check_done:
+                    if self._format_error is not None:
+                        raise self._format_error
+                    return
+                cursor.execute("SELECT state_json FROM agent_checkpoints ORDER BY updated_at DESC")
+                rows = cursor.fetchall()
+            try:
+                for (payload,) in rows:
+                    _validate_checkpoint_payload(payload)
+            except CheckpointFormatError as exc:
+                self._format_error = exc
+                self._format_check_done = True
+                raise
+            self._format_check_done = True
+
     def save(
         self,
         thread_id: str,
@@ -249,6 +298,7 @@ class PostgresCheckpointStore:
         *,
         expected_version: int | None = None,
     ) -> int:
+        self.check_readiness()
         # The connection is autocommit for LangGraph's PostgresSaver, so the
         # version read and write must explicitly share one transaction.  A
         # standalone SELECT ... FOR UPDATE would otherwise release its lock
@@ -365,3 +415,13 @@ def _validate_checkpoint_payload(payload: Any) -> dict[str, Any]:
             "after confirming the old data can be retained"
         )
     return payload
+
+
+def _decode_checkpoint_payload(serialized: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(serialized)
+    except json.JSONDecodeError as exc:
+        raise CheckpointFormatError(
+            "checkpoint payload is invalid JSON; retain the store and run an authorized migration or clean reset"
+        ) from exc
+    return _validate_checkpoint_payload(payload)

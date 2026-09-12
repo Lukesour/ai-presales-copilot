@@ -82,8 +82,14 @@ curl -s http://127.0.0.1:8090/readyz
 
 ```bash
 PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
+  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 \
+  --model qwen3-8b-q4
 ```
+
+`--model` 必须与 llama-server 的 `--alias`（或 `/v1/models` 返回的 `id`）一致。
+本机若按 `--alias qwen3-1.7b-demo` 启动 1.7B 模型，应将上面的值改为
+`qwen3-1.7b-demo`。API 默认使用新的 `.runtime/agent/checkpoints-v2.db`；旧的
+`.runtime/agent/checkpoints.db` 会保留，不会被静默转换或删除。
 
 创建一条需求优先 run：
 
@@ -118,6 +124,17 @@ PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
 
 Gradio 页面默认使用 `Demo Replay`，首屏先展示一条登记过的合成客户原始需求；页面不再提供场景下拉框或“辅助示例”按钮，避免把预填 Brief 误认为正式输入入口。切换到 `Live API` 后，页面加载、刷新和每次实时分析前都会检查 `/readyz`。
 如果数据库、知识库或模型未就绪，会阻止创建 run，但不会影响 `Demo Replay`。
+
+排查 Live API 时先查看：
+
+```bash
+curl -sS -H 'Authorization: Bearer dev-token' http://127.0.0.1:8090/readyz
+```
+
+`checks.database_error_code=checkpoint_format_unsupported` 表示旧 checkpoint 与当前
+v2 格式不兼容；保留旧库并使用新的默认路径重启，或执行经过授权的迁移。不要直接把
+旧 JSON 补上格式字段。`checks.model_error_code=model_mismatch` 表示 API 的
+`--model` 与 llama-server 的 `--alias` 不一致。
 
 无模型或无 API 环境也可以直接运行求职演示：
 

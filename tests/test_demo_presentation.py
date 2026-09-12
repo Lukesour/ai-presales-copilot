@@ -140,6 +140,22 @@ def test_readiness_view_distinguishes_ready_and_not_ready():
     assert not_ready["checks_rows"] == [{"check": "model", "status": "失败"}]
 
 
+def test_readiness_view_names_the_actual_checkpoint_failure():
+    view = build_readiness_view(
+        {
+            "status": "not_ready",
+            "checks": {
+                "database": False,
+                "knowledge_index": True,
+                "model": True,
+                "database_error_code": "checkpoint_format_unsupported",
+            },
+        }
+    )
+    assert "checkpoint" in view["message"]
+    assert "llama-server 未启动" in view["message"]
+
+
 def test_replay_approval_is_local_and_does_not_need_api(monkeypatch, scenarios):
     snapshot = load_demo_replay(ROOT / "data/demo/replays", "high_risk", scenarios=scenarios)
     session = new_session()

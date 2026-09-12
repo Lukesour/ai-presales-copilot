@@ -175,6 +175,19 @@ def test_model_unavailable_never_falls_back_to_template():
         assert state["error_code"] == "model_unavailable"
 
 
+def test_llama_readiness_rejects_an_unserved_configured_model(monkeypatch):
+    client = LlamaClient("http://unused", "configured-model")
+    monkeypatch.setattr(client, "health", lambda: {"status": 200})
+    monkeypatch.setattr(client, "_get", lambda _path: {"data": [{"id": "served-model"}]})
+
+    result = client.readiness()
+
+    assert result["status"] == "not_ready"
+    assert result["error_code"] == "model_mismatch"
+    assert result["configured_model"] == "configured-model"
+    assert result["available_models"] == ["served-model"]
+
+
 def test_sensitive_customer_input_requires_review():
     with CheckpointStore(":memory:") as store:
         workflow = LocalModelWorkflow(FakeModel(), KnowledgeBase("data/knowledge"), store)

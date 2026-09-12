@@ -12,8 +12,13 @@ make demo-replay-check
 
 ```bash
 PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
+  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 \
+  --model qwen3-8b-q4
 ```
+
+若手工启动 llama-server 时使用了其他 `--alias`，将 `--model` 改成相同的值。若本机
+已有旧 `.runtime/agent/checkpoints.db`，当前 API 默认使用新的 v2 checkpoint 路径；旧库
+不会被删除或静默转换。
 
 打开页面：
 

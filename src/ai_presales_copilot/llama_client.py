@@ -49,6 +49,50 @@ class LlamaClient:
         except (urllib.error.URLError, TimeoutError) as exc:
             raise LlamaClientError(f"llama.cpp health check failed: {exc}") from exc
 
+    def readiness(self) -> dict[str, Any]:
+        """Verify that the server is healthy and exposes the configured model."""
+
+        try:
+            health = self.health()
+        except LlamaClientError:
+            return {
+                "status": "not_ready",
+                "error_code": "model_unavailable",
+                "detail": "llama-server /health is unavailable",
+            }
+        if health.get("status") != 200:
+            return {
+                "status": "not_ready",
+                "error_code": f"http_{health.get('status')}",
+            }
+        try:
+            catalog = self._get("/v1/models")
+        except LlamaClientError:
+            return {
+                "status": "not_ready",
+                "error_code": "model_catalog_unavailable",
+                "detail": "llama-server /v1/models is unavailable",
+            }
+        available_models = _model_ids(catalog)
+        if not available_models:
+            return {
+                "status": "not_ready",
+                "error_code": "model_catalog_empty",
+                "configured_model": self.model,
+            }
+        if self.model not in available_models:
+            return {
+                "status": "not_ready",
+                "error_code": "model_mismatch",
+                "configured_model": self.model,
+                "available_models": available_models,
+            }
+        return {
+            "status": "ready",
+            "model": self.model,
+            "available_models": available_models,
+        }
+
     def chat(
         self,
         messages: list[dict[str, str]],
@@ -165,6 +209,24 @@ class LlamaClient:
         except json.JSONDecodeError as exc:
             raise LlamaClientError("llama.cpp returned invalid JSON") from exc
 
+    def _get(self, path: str) -> dict[str, Any]:
+        request = urllib.request.Request(f"{self.base_url}{path}", method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            raise LlamaClientError(f"llama.cpp HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise LlamaClientError(f"llama.cpp request failed: {exc}") from exc
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise LlamaClientError("llama.cpp returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise LlamaClientError("llama.cpp returned a non-object JSON response")
+        return payload
+
     def _post_sse(self, path: str, payload: dict[str, Any]) -> Iterator[str]:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
@@ -222,3 +284,14 @@ def _inline_local_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
     expanded_schema = expand(schema)
     return expanded_schema if isinstance(expanded_schema, dict) else dict(schema)
+
+
+def _model_ids(payload: dict[str, Any]) -> list[str]:
+    entries = payload.get("data") or payload.get("models") or []
+    if not isinstance(entries, list):
+        return []
+    return [
+        str(item["id"])
+        for item in entries
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
+    ]

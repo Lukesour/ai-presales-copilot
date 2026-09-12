@@ -56,6 +56,7 @@ REQUIREMENTS_WORKFLOW_NODES = (
     "intake", "extract_requirements", "assess_requirements", "clarify", "requirements_confirmation"
 )
 _REQUIREMENT_NODE_SET = set(REQUIREMENTS_WORKFLOW_NODES)
+_READINESS_CHECKS = ("database", "knowledge_index", "model", "pgvector")
 
 
 def build_solution_view(
@@ -256,8 +257,13 @@ def build_readiness_view(payload: Mapping[str, Any] | None, *, error: str | None
         "ready": status == "ready",
         "label": "Live API 就绪" if status == "ready" else "Live API 未就绪",
         "checks": dict(checks),
-        "checks_rows": [{"check": key, "status": "通过" if value is True else "失败"} for key, value in checks.items()],
+        "checks_rows": [
+            {"check": key, "status": "通过" if checks[key] is True else "失败"}
+            for key in _READINESS_CHECKS
+            if key in checks
+        ],
         "error": error,
+        "message": _readiness_message(status, checks, error),
     }
 
 
@@ -265,8 +271,46 @@ def render_mode_banner(mode: str, readiness: Mapping[str, Any] | None = None) ->
     if mode == "replay":
         return "### Demo Replay · 静态快照 · 非实时模型调用\n不访问 API、数据库或模型服务。"
     if readiness and not readiness.get("ready"):
-        return "### Live API 未就绪\n请先启动依赖服务，或切换到 Demo Replay。"
+        return f"### Live API 未就绪\n{readiness.get('message') or '请先启动依赖服务，或切换到 Demo Replay。'}"
     return "### Live API · 实时 Agent 执行\n生成前会再次校验 `/readyz`。"
+
+
+def _readiness_message(
+    status: Any,
+    checks: Mapping[str, Any],
+    error: str | None,
+) -> str:
+    if status == "ready":
+        return "Live API 已就绪。"
+    if error or status == "unreachable":
+        return "Live API 未就绪，已阻止创建 run；请确认 Presales API 正在 8090 端口监听。"
+    if checks.get("database_error_code") == "checkpoint_format_unsupported" or checks.get(
+        "database_error"
+    ) == "CheckpointFormatError":
+        return (
+            "Live API 未就绪，已阻止创建 run：checkpoint 数据库与当前 v2 格式不兼容。"
+            "请保留旧库，重启 API 使用新的版本化 checkpoint 路径，或执行明确授权的迁移；"
+            "这不是 llama-server 未启动。"
+        )
+    if checks.get("model_error_code") == "model_mismatch":
+        configured = checks.get("model_configured", "unknown")
+        available = ", ".join(str(item) for item in checks.get("model_available", []))
+        return (
+            "Live API 未就绪，已阻止创建 run：llama-server 已响应，但 API 配置的模型 "
+            f"`{configured}` 不在服务目录中（当前：`{available or 'unknown'}`）。"
+            "请让 `--model` 与 llama-server 的 `--alias` 一致。"
+        )
+    failed = [key for key in _READINESS_CHECKS if checks.get(key) is False]
+    if failed:
+        labels = {
+            "database": "数据库",
+            "knowledge_index": "知识索引",
+            "model": "模型",
+            "pgvector": "pgvector",
+        }
+        dependencies = "、".join(labels.get(key, key) for key in failed)
+        return f"Live API 未就绪，已阻止创建 run：失败依赖为 {dependencies}。请查看 `/readyz` 检查详情。"
+    return "Live API 未就绪，已阻止创建 run；请先启动依赖服务，或切换到 Demo Replay。"
 
 
 def _summary_markdown(payload: Mapping[str, Any]) -> str:

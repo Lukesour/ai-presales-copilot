@@ -12,7 +12,7 @@ from ai_presales_copilot.api_v2 import LocalTokenAuth, create_fastapi_app
 from ai_presales_copilot.knowledge import KnowledgeBase
 from ai_presales_copilot.llama_client import LlamaClient
 from ai_presales_copilot.llm_agent import LocalModelWorkflow
-from ai_presales_copilot.persistence import create_checkpoint_store
+from ai_presales_copilot.persistence import DEFAULT_CHECKPOINT_DB, create_checkpoint_store
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,7 +21,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8090)
-    parser.add_argument("--db", default=os.getenv("CHECKPOINT_DB", str(ROOT / ".runtime/agent/checkpoints.db")))
+    parser.add_argument(
+        "--db",
+        default=os.getenv("CHECKPOINT_DB", str(ROOT / DEFAULT_CHECKPOINT_DB)),
+        help="SQLite path or PostgreSQL DSN; the default is the current v2 local store.",
+    )
     parser.add_argument("--llama-url", default=os.getenv("LLAMA_BASE_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--model", default=os.getenv("LLAMA_MODEL", "qwen3-8b-q4"))
     parser.add_argument("--model-path", default=os.getenv("LLAMA_MODEL_PATH", ""))

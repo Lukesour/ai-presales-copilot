@@ -202,7 +202,7 @@ def create_fastapi_app(
         return {"status": "ok", "service": "presales-api", "version": "2.0.0"}
 
     @app.get("/readyz")
-    async def readyz():
+    def readyz():
         knowledge_loaded = bool(getattr(knowledge_base, "documents", []))
         if knowledge_index is not None and not knowledge_loaded:
             try:
@@ -217,23 +217,71 @@ def create_fastapi_app(
         if knowledge_index is not None:
             checks["pgvector"] = False
         try:
-            # A read-only lookup exercises both SQLite and PostgreSQL stores.
-            checkpoint_store.load_by_run_id("__readiness_probe__")
+            check_store = getattr(checkpoint_store, "check_readiness", None)
+            if callable(check_store):
+                check_store()
+            else:
+                # Keep compatibility with a narrow test double that only
+                # exposes the historical read-only lookup seam.
+                checkpoint_store.load_by_run_id("__readiness_probe__")
             checks["database"] = True
+        except CheckpointFormatError as exc:
+            checks.update(
+                {
+                    "database_error": type(exc).__name__,
+                    "database_error_code": "checkpoint_format_unsupported",
+                    "database_error_detail": str(exc),
+                    "database_action": (
+                        "Retain the old store and start with a new current-format store, "
+                        "or run an explicitly authorized migration."
+                    ),
+                }
+            )
         except Exception as exc:  # noqa: BLE001 - readiness must report a safe summary
-            checks["database_error"] = type(exc).__name__
+            checks.update(
+                {
+                    "database_error": type(exc).__name__,
+                    "database_error_code": "database_unavailable",
+                }
+            )
         if knowledge_index is not None:
             try:
                 checks["pgvector"] = bool(knowledge_index.health())
             except Exception as exc:  # noqa: BLE001 - readiness summary only
                 checks["pgvector_error"] = type(exc).__name__
         try:
-            model_status = model.health()
-            checks["model"] = model_status.get("status") == 200
+            model_readiness = getattr(model, "readiness", None)
+            model_status = (
+                model_readiness()
+                if callable(model_readiness)
+                else model.health()
+            )
+            if callable(model_readiness):
+                checks["model"] = model_status.get("status") == "ready"
+                if not checks["model"]:
+                    checks["model_error_code"] = model_status.get(
+                        "error_code", "model_unavailable"
+                    )
+                    if model_status.get("detail"):
+                        checks["model_error_detail"] = model_status["detail"]
+                    if model_status.get("configured_model"):
+                        checks["model_configured"] = model_status["configured_model"]
+                    if model_status.get("available_models"):
+                        checks["model_available"] = model_status["available_models"]
+            else:
+                checks["model"] = model_status.get("status") == 200
             if not checks["model"]:
-                checks["model_error"] = f"http_{model_status.get('status')}"
+                checks.setdefault(
+                    "model_error",
+                    model_status.get("error_code", f"http_{model_status.get('status')}"),
+                )
         except (LlamaClientError, OSError, TimeoutError) as exc:
-            checks["model_error"] = type(exc).__name__
+            checks.update(
+                {
+                    "model_error": type(exc).__name__,
+                    "model_error_code": "model_unavailable",
+                }
+            )
         required_checks = ["database", "knowledge_index", "model"]
         if knowledge_index is not None:
             required_checks.append("pgvector")

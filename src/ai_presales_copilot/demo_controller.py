@@ -181,7 +181,7 @@ def build_ui_values(session: Mapping[str, Any], scenarios: Mapping[str, Any]) ->
     errors = state.get("errors") or []
     if errors:
         banner += f"\n\n**执行诊断：** {html.escape(str(errors[0]))}"
-    if session.get("message"):
+    if session.get("message") and session.get("message") != readiness.get("message"):
         banner += f"\n\n{html.escape(str(session['message']))}"
     status = state.get("status")
     if status == "needs_clarification":
@@ -243,8 +243,9 @@ def reset_run(session: dict[str, Any]) -> None:
 
 def run_live(session: dict[str, Any], scenarios: Mapping[str, Any], api_url: str, token: str) -> None:
     session["readiness"] = fetch_readiness(api_url, token)
-    if session["readiness"].get("status") != "ready":
-        session["message"] = "Live API 未就绪，已阻止创建 run；请启动 llama-server 或切换到 Replay。"
+    readiness = build_readiness_view(session["readiness"])
+    if not readiness["ready"]:
+        session["message"] = readiness["message"]
         reset_run(session)
         return
     raw_request = session.get("raw_request") or scenarios[session["scenario_id"]].brief.raw_request
