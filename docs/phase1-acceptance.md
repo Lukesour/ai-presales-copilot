@@ -8,14 +8,16 @@
 2. `docker compose --env-file .env -f deploy/compose.agent.yaml up --build`。
 3. `GET /healthz` 返回 200；`GET /readyz` 只有 PostgreSQL、知识索引和 llama-server 全部正常才返回 200。
 4. 可选执行 `docker compose --profile ingest -f deploy/compose.agent.yaml run --rm presales-ingest`，资料通过登记的来源进入 PostgreSQL/pgvector 和只读知识卷。
-5. 用 `POST /v1/projects/{project_id}/runs` 创建 run；重复相同幂等键返回同一 `run_id`，替换 brief 则返回 409。
-6. 读取 run/events；高风险、合规、无证据或注入案例必须为 `waiting_for_review`，并保存 reviewer、角色、理由、时间、state_version 和幂等键。
-7. `approve` 后通过 LangGraph 原生 `Command(resume=...)` 进入 `finalize` 并变为 `complete`，`reject` 后状态为 `rejected`；重复审核不生成新结果，另一幂等键不能覆盖历史决定。
+5. 用 `POST /v2/projects/{project_id}/runs` 提交 `input.raw_request`；原始请求先进入 `needs_clarification` 或 `ready_for_confirmation`，不接受完整 Brief 作为正式新流程入口。
+6. 在未确认前检查 events 不包含 `retrieve`、`draft` 或 `finalize`；字段事实的 `source_quote` 必须在对应输入轮次中可定位。
+7. 用 `/clarifications` 追加最多 3 个回合，用 `/requirements/confirm` 确认 warning 假设；重复相同幂等键返回同一状态，过期 `state_version` 返回 409。
+8. 确认后才进入检索和方案；高风险、合规、无证据或注入案例必须为 `waiting_for_review`，并保存 reviewer、角色、理由、时间、state_version 和幂等键。
+9. `approve` 后通过 LangGraph 原生 `Command(resume=...)` 进入 `finalize` 并变为 `complete`，`reject` 后状态为 `rejected`；重复审核不生成新结果，另一幂等键不能覆盖历史决定。
 
 ## 失败门
 
-- llama-server 不可用：状态为 `model_unavailable`，没有伪造的固定模板方案。
-- 模型返回非法 JSON/不符合 schema：最多一次结构化重试，仍失败则 `model_unavailable`。
+- llama-server 不可用：方案节点状态为 `model_unavailable`，没有伪造的固定模板方案；需求抽取最多进入带 `deterministic_fallback` 标记的保守原文匹配路径，仍不能绕过需求门。
+- 模型返回非法 JSON/不符合 schema：最多一次结构化重试；需求抽取失败可安全降级并停在需求门，方案节点仍为 `model_unavailable`。
 - 模型引用未知 `evidence_id`：引用被丢弃，claim 标记 `needs_review`，并触发审核风险。
 - 未授权 tenant/project/role：检索前拒绝，不能通过生成后删除文本来“隔离”。
 - 远程资料未在来源登记、非 HTTPS、robots 不允许或解析发现敏感内容：导入失败并保留原因。

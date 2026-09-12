@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .schemas import SolutionResponseV2, validate_solution_dict
+from .schemas import SolutionResponseV2
 from .security import inspect_sensitive_data, inspect_untrusted_input
 
 
@@ -79,18 +79,10 @@ def filter_candidates(
             reasons.append("assistant_json_invalid")
         else:
             try:
-                if answer.get("schema_version") == "2.0":
-                    parsed = SolutionResponseV2.model_validate(answer)
-                    referenced = {
-                        evidence_id for claim in parsed.claims for evidence_id in claim.evidence_ids
-                    }
-                else:
-                    validate_solution_dict(answer, require_all_fields=False)
-                    referenced = {
-                        item.get("evidence_id")
-                        for item in answer.get("evidence", [])
-                        if isinstance(item, dict)
-                    }
+                parsed = SolutionResponseV2.model_validate(answer)
+                referenced = {
+                    evidence_id for claim in parsed.claims for evidence_id in claim.evidence_ids
+                }
                 if evidence_ids is not None and not referenced.issubset(available):
                     reasons.append("unknown_evidence_reference")
             except (TypeError, ValueError) as exc:

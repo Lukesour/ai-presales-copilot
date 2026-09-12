@@ -6,9 +6,9 @@ import re
 from dataclasses import dataclass, field
 
 INJECTION_PATTERNS = (
-    re.compile(r"忽略(?:之前|以上|所有)(?:指令|规则)", re.IGNORECASE),
+    re.compile(r"忽略(?:之前|以上|所有).{0,4}(?:指令|规则)", re.IGNORECASE),
     re.compile(r"ignore\s+(?:(?:all\s+)?(?:previous|prior|above|earlier))\s+instructions", re.IGNORECASE),
-    re.compile(r"泄露(?:系统提示词|提示词|system prompt)", re.IGNORECASE),
+    re.compile(r"(?:泄露|输出).{0,8}(?:系统提示词|提示词|system prompt)", re.IGNORECASE),
     re.compile(r"system\s+prompt", re.IGNORECASE),
     re.compile(r"输出你的(?:密钥|秘密|内部规则)", re.IGNORECASE),
 )

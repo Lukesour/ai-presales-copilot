@@ -10,16 +10,16 @@
 
 ### 交付物
 
-- `CustomerBrief`、`SolutionResponse` 和 JSON Schema 版本化契约。
+- `CustomerInputV2`、`CustomerBriefV2`、`SolutionResponseV2` 和 JSON Schema 版本化契约。
 - 显式 Agent 节点：需求、检索、架构、POC、模型策略、风险门、输出。
 - PostgreSQL/SQLite checkpoint、run/trace/thread ID 和人工审核 approve/reject；Compose 路径使用 LangGraph 原生 `PostgresSaver` interrupt/resume。
 - 无证据保守回答、提示词注入检测、敏感信息和无依据承诺检查。
 - Dify 工作流说明、Gradio Agent 模式、本地 HTTP API。
-- 24 条合成黄金问题集与离线评测。
+- 4 条注册 Replay 场景与当前 v2 离线评测。
 
 ### 验收
 
-`case-001` 首次运行停在 `waiting_for_review`（`error_code=needs_review`）；人工 approve 后完成；没有证据时摘要包含“资料不足”，且不出现产品承诺。
+`demo-normal-001` 的 Replay 能展示需求输入、需求确认和最终方案状态；高风险 Replay 能展示人工审核前后的状态切换；没有证据时摘要包含“资料不足”，且不出现产品承诺。
 
 ## 第 2 周：POC、部署和微调实验链路
 
@@ -31,13 +31,13 @@
 
 - 四阶段 POC：需求数据、RAG/Agent 基线、模型策略实验、验收生产建议。
 - 云 API、llama.cpp、本地轻量服务、vLLM GPU 服务的决策矩阵。
-- 72 条可追溯的合成对话数据，按源案例做 train/dev/test split。
+- 12 条可追溯的合成对话数据，按 Replay 场景做 train/dev/test split。
 - TRL + PEFT QLoRA 配置、LLaMA Factory 对照配置、dry-run 和 hash manifest。
 - Colab QLoRA 运行手册和 base/adapter 对比协议。
 
 ### 验收
 
-本机完成 dataset-check 和 finetune-dry-run，并在 Colab Tesla T4 上完成 compact QLoRA 实测；adapter 在 18 条 held-out synthetic cases 上达到 JSON parse `100%`、compact schema `14/18`、policy pass `18/18`。完整响应仍由 Agent/RAG 组装，不能把 compact schema 指标表述成生产业务准确率。
+本机完成 dataset-check 和 finetune-dry-run；历史 Colab Tesla T4 compact QLoRA 实测另存为证据，adapter 在 18 条 held-out synthetic cases 上达到 JSON parse `100%`、compact schema `14/18`、policy pass `18/18`。完整响应仍由 Agent/RAG 组装，不能把 compact schema 指标表述成生产业务准确率。
 
 ## 第 3 周：工程化、红队、文档和面试呈现
 
@@ -59,7 +59,7 @@
 
 ## 日常工作节奏
 
-1. 每天先跑 `make test lint eval agent-eval dataset-check`，避免文档和实验漂移。
+1. 每天先跑 `make test lint eval dataset-check demo-replay-check`，避免文档和实验漂移。
 2. 每个新增结论都写“证据/假设/验证动作”三者之一。
 3. 每次模型、数据、prompt 或上游版本变化都更新 manifest/版本记录。
 4. 每个演示失败路径都保留：无证据、合规、高风险、拒绝审核、API 不可用。

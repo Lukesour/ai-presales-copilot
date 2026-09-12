@@ -2,63 +2,73 @@
   "files": {
     "train": {
       "path": "train.jsonl",
-      "sha256": "a545cff063ed8c8d7cd90fdcc54176a82c51215e7312b4fc2052cdacc64acdbf"
+      "sha256": "8d25a77b997604f2c7955c21e3d8a5516359ddfe8681cf7e3f39a95cd479186c"
     },
     "dev": {
       "path": "dev.jsonl",
-      "sha256": "a95529438a1824d6cf895ceb45d2105454fe28e0b03883865644f88a490172c4"
+      "sha256": "0447fc6a136c46c2d0aca7c13581919f08fcb6b22f0ebaea548b88bcc3ae8064"
     },
     "test": {
       "path": "test.jsonl",
-      "sha256": "0fd2321f8f832b6c03da009144165e4183cd5e46e69441f437068486bead9e63"
+      "sha256": "1429479e0fba986c391ae909d42ce39f22f27e200a24f37efbdc5dd34ec17b31"
     }
   },
   "metadata": {
     "generator": "scripts/build_finetune_dataset.py",
-    "system_prompt_version": "v2-json-contract-rag-context",
-    "input_context_version": "v1-structured-brief-and-retrieved-evidence",
+    "synthetic": true,
+    "source": "data/demo/replays/",
+    "source_version": "v2-requirements-first-replay",
+    "source_manifest": "data/evaluation/manifest.json",
+    "source_manifest_sha256": "48a48ecb8f090ccf9cfd08d6474f5c3f64c3b35676aa7465f409ad6e40d8f1d7",
+    "license": "internal-synthetic",
+    "sensitivity": "non-sensitive",
+    "purpose": "fine-tuning-experiment",
+    "created_at": "2026-09-11",
+    "system_prompt_version": "v2-requirements-first-compact-rag-context",
+    "input_context_version": "v2-requirements-first-replay",
     "target_format": "compact_json",
+    "target_profile": "compact",
     "variants": 3,
-    "source_cases": 24,
-    "split_policy": "deterministic case-level split: test/dev/train",
+    "source_cases": 4,
+    "split_policy": "deterministic scenario-level split: test/dev/train",
     "stats": {
       "train": {
-        "examples": 42,
-        "messages": 126,
+        "examples": 6,
+        "messages": 18,
         "role_counts": {
-          "system": 42,
-          "user": 42,
-          "assistant": 42
+          "system": 6,
+          "user": 6,
+          "assistant": 6
         },
-        "min_chars": 328,
-        "max_chars": 3778,
-        "avg_chars": 1578.83,
+        "min_chars": 264,
+        "max_chars": 359,
+        "avg_chars": 313.22,
         "ids_unique": true
       },
       "dev": {
-        "examples": 12,
-        "messages": 36,
+        "examples": 3,
+        "messages": 9,
         "role_counts": {
-          "system": 12,
-          "user": 12,
-          "assistant": 12
+          "system": 3,
+          "user": 3,
+          "assistant": 3
         },
-        "min_chars": 328,
-        "max_chars": 3799,
-        "avg_chars": 1454.44,
+        "min_chars": 346,
+        "max_chars": 876,
+        "avg_chars": 526.22,
         "ids_unique": true
       },
       "test": {
-        "examples": 18,
-        "messages": 54,
+        "examples": 3,
+        "messages": 9,
         "role_counts": {
-          "system": 18,
-          "user": 18,
-          "assistant": 18
+          "system": 3,
+          "user": 3,
+          "assistant": 3
         },
-        "min_chars": 328,
-        "max_chars": 3894,
-        "avg_chars": 1629.39,
+        "min_chars": 336,
+        "max_chars": 957,
+        "avg_chars": 549.89,
         "ids_unique": true
       }
     }

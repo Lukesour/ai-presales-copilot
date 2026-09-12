@@ -53,29 +53,63 @@ def main() -> int:
 
 
 def _capture_scenario(api_url: str, token: str, scenario: Any, args: argparse.Namespace) -> ReplaySnapshot:
+    input_payload = {
+        "input": {"raw_request": scenario.brief.raw_request, "source": "meeting_notes"},
+        "source": "meeting_notes",
+    }
     state = api_request(
         "POST",
-        f"{api_url}/v1/projects/gradio/runs",
-        {"brief": scenario.brief.model_dump(mode="json")},
+        f"{api_url}/v2/projects/gradio/runs",
+        input_payload,
         token=token,
         roles="presales",
         idempotency_key=f"replay-capture-{scenario.scenario_id}-{uuid4().hex}",
     )
+    initial = _sanitize_public_state(state, scenario.scenario_id, "initial", scenario.brief.case_id)
+    clarified = None
+    confirmed = None
+    if state.get("status") == "needs_clarification":
+        answer = _clarification_answer(scenario.scenario_id)
+        state = api_request(
+            "POST",
+            f"{api_url}/v2/runs/{state['run_id']}/clarifications",
+            {"message": answer, "expected_state_version": state.get("state_version")},
+            token=token,
+            roles="presales",
+            idempotency_key=f"replay-capture-clarification-{uuid4().hex}",
+        )
+        clarified = _sanitize_public_state(state, scenario.scenario_id, "clarified", scenario.brief.case_id)
+    if state.get("status") == "ready_for_confirmation":
+        state = api_request(
+            "POST",
+            f"{api_url}/v2/runs/{state['run_id']}/requirements/confirm",
+            {
+                "decision": "confirm",
+                "acknowledged_warnings": (state.get("requirement_analysis") or {}).get("warning_fields", []),
+                "expected_state_version": state.get("state_version"),
+            },
+            token=token,
+            roles="presales",
+            idempotency_key=f"replay-capture-confirm-{uuid4().hex}",
+        )
+        confirmed = _sanitize_public_state(state, scenario.scenario_id, "confirmed", scenario.brief.case_id)
     pending = (
-        _sanitize_public_state(state, scenario.scenario_id, "pending")
+        _sanitize_public_state(state, scenario.scenario_id, "pending", scenario.brief.case_id)
         if state.get("status") == "waiting_for_review"
         else None
     )
     if pending is not None:
         state = api_request(
             "POST",
-            f"{api_url}/v1/runs/{state['run_id']}/reviews",
-            {"decision": "approve", "reason": "Capture synthetic demo replay after review"},
+            f"{api_url}/v2/runs/{state['run_id']}/reviews",
+            {"decision": "approve", "reason": "Capture synthetic demo replay after review", "state_version": state.get("state_version")},
             token=token,
             roles="reviewer",
             idempotency_key=f"replay-capture-review-{uuid4().hex}",
         )
-    final = _sanitize_public_state(state, scenario.scenario_id, "final")
+    final = _sanitize_public_state(state, scenario.scenario_id, "final", scenario.brief.case_id)
+    if final.get("response") is None:
+        final["response"] = _blocked_response(scenario.brief.case_id, final)
     events = normalize_live_events(fetch_events(api_url, token, state.get("run_id")))
     response = final.get("response") or {}
     provenance = response.get("provenance") or {}
@@ -91,13 +125,17 @@ def _capture_scenario(api_url: str, token: str, scenario: Any, args: argparse.Na
             prompt_version=str(provenance.get("prompt_version") or "unknown"),
             knowledge_snapshot_id=str(provenance.get("knowledge_snapshot_id") or "unknown"),
         ),
+        initial_input=initial.get("input"),
+        input_turns=initial.get("input_turns", []),
         events=events,
-        states=ReplayStates(pending=pending, final=final),
+        states=ReplayStates(initial=initial, clarified=clarified, confirmed=confirmed, pending=pending, final=final),
     )
     return snapshot
 
 
-def _sanitize_public_state(state: dict[str, Any], scenario_id: str, phase: str) -> dict[str, Any]:
+def _sanitize_public_state(
+    state: dict[str, Any], scenario_id: str, phase: str, scenario_case_id: str
+) -> dict[str, Any]:
     """Replace runtime identities before a public demo artifact is written."""
 
     sanitized = copy.deepcopy(state)
@@ -112,6 +150,11 @@ def _sanitize_public_state(state: dict[str, Any], scenario_id: str, phase: str) 
             "project_id": "demo",
         }
     )
+    for key in ("brief", "intake_brief"):
+        if isinstance(sanitized.get(key), dict):
+            sanitized[key]["case_id"] = scenario_case_id
+    if isinstance(sanitized.get("response"), dict):
+        sanitized["response"]["case_id"] = scenario_case_id
     review = sanitized.get("review")
     if isinstance(review, dict):
         review["reviewer_id"] = "demo-reviewer" if review.get("reviewer_id") else None
@@ -129,6 +172,41 @@ def _sanitize_public_state(state: dict[str, Any], scenario_id: str, phase: str) 
         sanitized["review"]["reviewer_id"] = None
         sanitized["review"]["idempotency_key"] = None
     return sanitized
+
+
+def _clarification_answer(scenario_id: str) -> str:
+    answers = {
+        "normal": "资料是维修手册和历史工单，目标用户是维修工程师；部署使用公有云 API，峰值并发5，完整答案10秒内，数据驻留中国境内并允许出域，验收要求关键问题可引用来源。",
+        "missing_then_clarified": "资料是维修手册和历史工单，目标用户是维修工程师；部署在企业内网，峰值并发20，完整答案5秒内，数据驻留中国境内且不能出域，答案必须可引用，目标是减少维修人员查找资料时间。",
+        "high_risk": "资料是维修手册和历史工单，目标用户是维修工程师；部署在私有化内网，峰值并发5，完整答案10秒内，数据不能出域并要求保留访问和审核审计，验收以数据边界和审计记录为准。",
+    }
+    return answers.get(scenario_id, "请补充部署、数据边界、容量和可测量的验收标准。")
+
+
+def _blocked_response(case_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    """Give a blocked Replay a safe, schema-valid explanation instead of a solution."""
+
+    return {
+        "schema_version": "2.0",
+        "case_id": case_id,
+        "executive_summary": "输入被安全策略阻断，未进入检索或方案生成。",
+        "requirements": [], "claims": [], "recommendations": [], "architecture": [],
+        "implementation_steps": [],
+        "risks": [{"category": "输入安全", "description": "提示注入或冲突边界不能作为方案事实。", "severity": "high", "action": "人工核验并脱敏后重新提交"}],
+        "clarifying_questions": ["请提供不含提示注入且边界一致的客户需求。"],
+        "evidence": [], "poc_plan": [], "model_strategy": {}, "assumptions": [],
+        "review": {"required": False, "status": "not_required"},
+        "provenance": {
+            "run_id": state.get("run_id", "replay-blocked-run"),
+            "trace_id": state.get("trace_id", "replay-blocked-trace"),
+            "thread_id": state.get("thread_id", "replay:blocked"),
+            "model_name": "requirements-first-policy",
+            "prompt_version": "v2-requirements-first-replay",
+            "knowledge_snapshot_id": "repository-knowledge-v1",
+            "generated_at": datetime.now(UTC).isoformat(),
+        },
+        "quality": {"parse_pass": True, "schema_pass": True, "evidence_coverage": 0.0},
+    }
 
 
 def _git_revision() -> str:

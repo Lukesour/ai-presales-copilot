@@ -27,7 +27,10 @@ SOLUTION_V2_FIELDS = (
 )
 WORKFLOW_NODES = (
     "intake",
+    "extract_requirements",
+    "assess_requirements",
     "clarify",
+    "requirements_confirmation",
     "query_rewrite",
     "retrieve",
     "draft",
@@ -45,7 +48,14 @@ _STATUS_LABELS = {
     "rejected": "已拒绝",
     "model_unavailable": "模型不可用",
     "failed": "失败",
+    "needs_clarification": "需要澄清",
+    "ready_for_confirmation": "等待确认",
+    "queued": "排队中",
 }
+REQUIREMENTS_WORKFLOW_NODES = (
+    "intake", "extract_requirements", "assess_requirements", "clarify", "requirements_confirmation"
+)
+_REQUIREMENT_NODE_SET = set(REQUIREMENTS_WORKFLOW_NODES)
 
 
 def build_solution_view(
@@ -60,10 +70,6 @@ def build_solution_view(
     if clarify:
         merged_questions.extend(str(item) for item in clarify.get("questions") or [])
     payload["clarifying_questions"] = list(dict.fromkeys(merged_questions))
-    if "recommendations" not in payload and "recommendation" in payload:
-        payload["recommendations"] = payload.get("recommendation") or []
-    if "review" not in payload and "review_status" in payload:
-        payload["review"] = {"status": payload.get("review_status")}
     requirements = payload.get("requirements") or []
     risks = payload.get("risks") or []
     poc_plan = payload.get("poc_plan") or []
@@ -174,10 +180,11 @@ def build_timeline_rows(
     current_node: str | None = None,
     current_status: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Combine persistent start/finish events into a fixed eleven-node timeline."""
+    """Project one unified, phase-aware timeline for the v2 workflow."""
 
     rows = {
         node: {
+            "phase": "需求分析" if node in _REQUIREMENT_NODE_SET else "方案交付",
             "node": node,
             "status": "未执行",
             "event": "—",
@@ -190,6 +197,8 @@ def build_timeline_rows(
     for event in events or []:
         node = event.get("node")
         event_type = str(event.get("event_type", ""))
+        if event_type in {"model_unavailable", "workflow_failed"}:
+            node = event.get("failed_node") or node
         if node not in rows and event_type.startswith("review_"):
             node = "human_review"
         if node not in rows:
@@ -203,6 +212,10 @@ def build_timeline_rows(
             row["status"] = "已通过"
         elif event_type == "review_rejected":
             row["status"] = "已拒绝"
+        elif event_type == "model_unavailable":
+            row["status"] = "模型不可用"
+        elif event_type == "workflow_failed":
+            row["status"] = "失败"
         elif event_type in {"node_finished", "run_finished"}:
             row["status"] = "已完成"
         elif status in _STATUS_LABELS:
@@ -219,6 +232,17 @@ def build_timeline_rows(
     if current_node in rows and current_status:
         rows[current_node]["status"] = _STATUS_LABELS.get(current_status, current_status)
     return [rows[node] for node in WORKFLOW_NODES]
+
+
+def build_requirements_first_timeline_rows(
+    events: list[Mapping[str, Any]] | None,
+    *,
+    current_node: str | None = None,
+    current_status: str | None = None,
+) -> list[dict[str, Any]]:
+    """Build the requirements-first projection of the unified timeline."""
+
+    return build_timeline_rows(events, current_node=current_node, current_status=current_status)
 
 
 def build_readiness_view(payload: Mapping[str, Any] | None, *, error: str | None = None) -> dict[str, Any]:
@@ -280,4 +304,13 @@ def _event_label(event_type: str) -> str:
         "review_requested": "请求审核",
         "review_approved": "审核通过",
         "review_rejected": "审核拒绝",
+        "model_unavailable": "模型不可用",
+        "workflow_failed": "工作流失败",
+        "requirements_extraction_fallback": "抽取降级",
+        "clarification_requested": "请求补充",
+        "clarification_received": "收到补充",
+        "clarification_command_recorded": "记录补充",
+        "requirements_confirmation_requested": "等待确认",
+        "requirements_confirmed": "确认需求",
+        "input_blocked": "输入阻断",
     }.get(event_type, event_type or "事件")

@@ -1,0 +1,35 @@
+{
+  "parameters": [
+    {
+      "$ref": "../components/http-boundary.json#/parameters/RunId"
+    },
+    {
+      "$ref": "../components/http-boundary.json#/parameters/ProjectHeader"
+    }
+  ],
+  "get": {
+    "operationId": "getRequirementsFirstRun",
+    "summary": "Read an authorized run state.",
+    "responses": {
+      "200": {
+        "description": "Current run state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../components/runs.json#/schemas/RunState"
+            }
+          }
+        }
+      },
+      "401": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "403": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "404": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      }
+    }
+  }
+}

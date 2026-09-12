@@ -1,4 +1,4 @@
-"""Minimal Dify App API adapter with timeouts and safe error messages."""
+"""Dify upstream adapter for the current requirements-first v2 contracts."""
 
 from __future__ import annotations
 
@@ -9,16 +9,21 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .schemas import CustomerBrief, SolutionResponse, validate_solution_dict
+from .schemas import CustomerInputV2, SolutionResponseV2
 from .security import wrap_untrusted_text
 
 
 class DifyClientError(RuntimeError):
-    """Raised when the configured Dify app cannot return a usable response."""
+    """Raised when the configured Dify app cannot return a valid v2 response."""
 
 
 class DifyClient:
-    """Call a Dify app without exposing the API key to a browser client."""
+    """Call a Dify app without exposing its API key to a browser client.
+
+    Dify's ``/v1/chat-messages`` path is an upstream provider protocol. The
+    adapter accepts only the current raw customer input and fails closed when
+    the workflow does not return the public ``SolutionResponseV2`` contract.
+    """
 
     def __init__(
         self,
@@ -35,14 +40,15 @@ class DifyClient:
     def configured(self) -> bool:
         return bool(self.api_key)
 
-    def chat(self, brief: CustomerBrief, *, stream: bool = False) -> SolutionResponse:
+    def chat(self, customer_input: CustomerInputV2, *, stream: bool = False) -> SolutionResponseV2:
         if not self.configured:
             raise DifyClientError(
-                "DIFY_APP_API_KEY is not configured; use the local-model FastAPI API for the Phase 1 path"
+                "DIFY_APP_API_KEY is not configured; use the local-model FastAPI API for the demo path"
             )
+        input_payload = customer_input.model_dump(mode="json")
         payload = {
-            "inputs": {"customer_brief": json.dumps(brief.to_dict(), ensure_ascii=False)},
-            "query": wrap_untrusted_text(brief.raw_request or brief.use_case),
+            "inputs": {"customer_input": json.dumps(input_payload, ensure_ascii=False)},
+            "query": wrap_untrusted_text(customer_input.raw_request),
             "response_mode": "streaming" if stream else "blocking",
             "user": self.user,
         }
@@ -58,9 +64,9 @@ class DifyClient:
         started = time.perf_counter()
         if stream:
             answer, metadata = self._stream(request)
-            response = self._to_solution({"answer": answer, "metadata": metadata}, brief)
-            response.latency_ms = round((time.perf_counter() - started) * 1000, 2)
-            return response
+            return self._parse_response(
+                {"answer": answer, "metadata": metadata}, customer_input, started
+            )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                 raw = response.read().decode("utf-8")
@@ -69,16 +75,11 @@ class DifyClient:
             raise DifyClientError(f"Dify HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise DifyClientError(f"Dify request failed: {exc}") from exc
-
         try:
             body = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise DifyClientError(
-                "Dify returned non-JSON output; configure blocking response mode"
-            ) from exc
-        response = self._to_solution(body, brief)
-        response.latency_ms = round((time.perf_counter() - started) * 1000, 2)
-        return response
+            raise DifyClientError("Dify returned non-JSON output; configure v2 JSON output") from exc
+        return self._parse_response(body, customer_input, started)
 
     def _stream(self, request: urllib.request.Request) -> tuple[str, dict[str, Any]]:
         chunks: list[str] = []
@@ -104,49 +105,25 @@ class DifyClient:
         return "".join(chunks), metadata
 
     @staticmethod
-    def _to_solution(body: dict[str, Any], brief: CustomerBrief) -> SolutionResponse:
-        """Accept a structured Dify JSON answer or preserve raw text for inspection."""
-
-        answer = body.get("answer", body)
+    def _parse_response(
+        body: dict[str, Any], customer_input: CustomerInputV2, started: float
+    ) -> SolutionResponseV2:
+        answer: Any = body.get("answer", body)
         if isinstance(answer, str):
             try:
                 answer = json.loads(answer)
-            except json.JSONDecodeError:
-                return SolutionResponse(
-                    case_id=brief.case_id,
-                    executive_summary=answer,
-                    model_name="dify",
-                    usage=body.get("metadata", {}).get("usage", {}),
-                )
+            except json.JSONDecodeError as exc:
+                raise DifyClientError("Dify answer must be a JSON encoded SolutionResponseV2") from exc
+        if isinstance(answer, dict) and isinstance(answer.get("response"), dict):
+            answer = answer["response"]
         if not isinstance(answer, dict):
-            raise DifyClientError("Dify answer must be a JSON object or JSON string")
-        answer.setdefault("case_id", brief.case_id)
-        validate_solution_dict(answer)
-        answer["model_name"] = "dify"
-        answer["usage"] = body.get("metadata", {}).get("usage", {})
-        return _solution_from_dict(answer)
-
-
-def _solution_from_dict(payload: dict[str, Any]) -> SolutionResponse:
-    from .schemas import Evidence, Requirement, RiskFlag
-
-    return SolutionResponse(
-        case_id=payload["case_id"],
-        executive_summary=payload["executive_summary"],
-        requirements=[Requirement(**item) for item in payload.get("requirements", [])],
-        recommendation=payload.get("recommendation", []),
-        architecture=payload.get("architecture", []),
-        implementation_steps=payload.get("implementation_steps", []),
-        risks=[RiskFlag(**item) for item in payload.get("risks", [])],
-        clarifying_questions=payload.get("clarifying_questions", []),
-        evidence=[Evidence(**item) for item in payload.get("evidence", [])],
-        poc_plan=payload.get("poc_plan", []),
-        model_strategy=payload.get("model_strategy", {}),
-        assumptions=payload.get("assumptions", []),
-        review_status=payload.get("review_status", "not_required"),
-        model_name=payload.get("model_name", "dify"),
-        latency_ms=payload.get("latency_ms"),
-        usage=payload.get("usage", {}),
-        run_id=payload.get("run_id"),
-        trace_id=payload.get("trace_id"),
-    )
+            raise DifyClientError("Dify answer must be a SolutionResponseV2 object")
+        try:
+            response = SolutionResponseV2.model_validate(answer)
+        except ValueError as exc:
+            raise DifyClientError(
+                "Dify answer does not satisfy the current SolutionResponseV2 contract"
+            ) from exc
+        if not response.case_id or response.case_id.startswith("intake-"):
+            raise DifyClientError("Dify response must contain the current run case_id")
+        return response

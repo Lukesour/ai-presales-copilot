@@ -9,7 +9,6 @@ from pathlib import Path
 
 from ai_presales_copilot.compact_contract import validate_compact_solution_dict
 from ai_presales_copilot.finetuning import dataset_stats, load_conversations, sha256_file
-from ai_presales_copilot.schemas import validate_solution_dict
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,16 +41,35 @@ def main() -> int:
         split_paths[split] = path
         for example in examples:
             _validate_training_contract(example, split, target_profile)
-    expected_prompt_version = (
-        "v2-json-contract-rag-context"
-        if target_profile == "full"
-        else "v1-compact-decision-contract-rag-context"
-    )
+    expected_prompt_version = "v2-requirements-first-compact-rag-context"
     if metadata.get("system_prompt_version") != expected_prompt_version:
         print("Manifest uses an outdated system prompt; regenerate the dataset.")
         return 3
-    if metadata.get("target_format") != "compact_json":
+    if target_profile != "compact" or metadata.get("target_format") != "compact_json":
         print("Manifest target_format must be compact_json; regenerate the dataset.")
+        return 3
+    expected_metadata = {
+        "synthetic": True,
+        "source": "data/demo/replays/",
+        "source_version": "v2-requirements-first-replay",
+        "license": "internal-synthetic",
+        "sensitivity": "non-sensitive",
+        "purpose": "fine-tuning-experiment",
+        "created_at": "2026-09-11",
+    }
+    if any(metadata.get(key) != value for key, value in expected_metadata.items()):
+        print("Manifest provenance metadata is incomplete or stale; regenerate the dataset.")
+        return 3
+    source_manifest = metadata.get("source_manifest")
+    if not isinstance(source_manifest, str):
+        print("Manifest source_manifest is required for provenance.")
+        return 3
+    source_manifest_path = (ROOT / source_manifest).resolve()
+    if ROOT not in source_manifest_path.parents or not source_manifest_path.is_file():
+        print("Manifest source_manifest must point inside the repository.")
+        return 3
+    if sha256_file(source_manifest_path) != metadata.get("source_manifest_sha256"):
+        print("Manifest source manifest hash is stale; regenerate the dataset.")
         return 3
     for split, path in split_paths.items():
         entry = manifest_payload.get("files", {}).get(split)
@@ -95,14 +113,20 @@ def _validate_training_contract(
         )
     if not isinstance(assistant_content, str):
         raise TypeError(f"{split}/{example.get('id')}: assistant target must be text")
+    metadata = example.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("synthetic") is not True:
+        raise ValueError(f"{split}/{example.get('id')}: synthetic provenance metadata is required")
+    for key, expected in (
+        ("license", "internal-synthetic"),
+        ("sensitivity", "non-sensitive"),
+    ):
+        if metadata.get(key) != expected:
+            raise ValueError(f"{split}/{example.get('id')}: invalid provenance metadata {key}")
     try:
         target = json.loads(assistant_content)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{split}/{example.get('id')}: assistant target is not JSON") from exc
-    if target_profile == "compact":
-        validate_compact_solution_dict(target)
-    else:
-        validate_solution_dict(target, require_all_fields=True)
+    validate_compact_solution_dict(target)
 
 
 if __name__ == "__main__":

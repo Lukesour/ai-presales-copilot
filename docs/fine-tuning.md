@@ -16,15 +16,15 @@ make dataset-check
 make finetune-token-audit
 ```
 
-当前数据来自 24 条合成客户案例，每个案例生成三个不同任务表述，结果为 72 条 ShareGPT-style 对话：
+当前数据来自 4 条注册的合成 Replay 场景，每个场景生成三个不同任务表述，结果为 12 条 ShareGPT-style 对话：
 
-- `train.jsonl`：42 条
-- `dev.jsonl`：12 条
-- `test.jsonl`：18 条
+- `train.jsonl`：6 条
+- `dev.jsonl`：3 条
+- `test.jsonl`：3 条
 
-变体按源案例分组，不能把同一个案例的变体拆到不同 split，避免数据泄漏。每条 user message 同时包含请求标识、结构化客户约束和本次检索得到的证据片段；因此训练和评测是“RAG context → 结构化方案生成”，而不是让 adapter 记忆或猜测 held-out 案例的产品事实。`manifest.json` 保存文件 hash、生成器、prompt 版本、输入上下文版本和统计信息。输出中的 `run_id`、`trace_id`、运行时延迟和模型名会被剔除，避免把一次运行的偶然字段教给模型。
+变体按源案例分组，不能把同一个案例的变体拆到不同 split，避免数据泄漏。每条 user message 同时包含请求标识、结构化客户约束和本次检索得到的证据片段；因此训练和评测是“RAG context → 结构化方案生成”，而不是让 adapter 记忆或猜测 held-out 案例的产品事实。`manifest.json` 保存文件 hash、来源 manifest、生成器、prompt 版本、输入上下文版本、许可、敏感级别和统计信息。输出中的 `run_id`、`trace_id`、运行时延迟和模型名会被剔除，避免把一次运行的偶然字段教给模型。
 
-默认的 `full` profile 使用紧凑 JSON，但仍要求模型一次生成完整的公开响应 schema。第一轮 T4 实验表明：0.5B 模型在只有几十条训练样本时容易生成可解析但不完整的对象，尤其漏掉 POC、模型策略和尾部审核字段。因此 notebook 默认使用 `compact` profile：模型只生成 `case_id`、摘要、建议、风险字符串、待确认问题、已召回的 `evidence_ids` 和审核状态；确定性的 Agent 继续负责 requirements、architecture、POC、model strategy 和 evidence 对象，再通过 schema/security gate 合并。这样把微调目标限制在稳定的决策行为和格式，把事实与长结构留在 RAG/Agent 层。
+默认的 `full` profile 使用紧凑 JSON，但仍要求模型一次生成完整的公开 `SolutionResponseV2` schema。第一轮 T4 实验表明：0.5B 模型在只有几十条训练样本时容易生成可解析但不完整的对象，尤其漏掉 POC、模型策略和尾部审核字段。因此 notebook 默认使用 `compact` profile：模型只生成 `case_id`、摘要、建议、风险字符串、待确认问题、已召回的 `evidence_ids` 和审核状态；确定性的 Agent 继续负责 requirements、architecture、POC、model strategy 和 evidence 对象，再通过 schema/security gate 合并。这样把微调目标限制在稳定的决策行为和格式，把事实与长结构留在 RAG/Agent 层。
 
 可以显式构建 compact 数据集：
 
@@ -98,9 +98,9 @@ PYTHONPATH=src python scripts/evaluate_finetuned_model.py \
 
 ### 已完成的 Colab compact 实验
 
-commit `095109616c99fe665d296eaab0eebe1b6bd5818b` 已在 Tesla T4 上完成一次可复现训练。实验使用 Qwen2.5-0.5B-Instruct、5 epochs、learning rate `5e-5`、trainer fp32、compute fp16，训练耗时约 147 秒；adapter 权重保存在 Drive，不进入 GitHub。
+历史实验 commit `095109616c99fe665d296eaab0eebe1b6bd5818b` 已在 Tesla T4 上完成一次可复现训练。实验使用 Qwen2.5-0.5B-Instruct、5 epochs、learning rate `5e-5`、trainer fp32、compute fp16，训练耗时约 147 秒；adapter 权重保存在 Drive，不进入 GitHub。该历史实验使用旧的 24/72 数据规模，不代表当前默认数据集。
 
-在同一个 18 条 held-out synthetic test split 上，base 与 adapter 均为 JSON parse `100%`，没有 generation truncation；adapter 的 compact schema pass 为 `14/18 = 77.78%`，base 为 `0/18`；policy pass 从 base 的 `15/18 = 83.33%` 提升到 adapter 的 `18/18 = 100%`。该 schema 只覆盖七字段 model-facing contract，不等于完整 `SolutionResponse` 的端到端业务准确率。
+在同一个 18 条 held-out synthetic test split 上，base 与 adapter 均为 JSON parse `100%`，没有 generation truncation；adapter 的 compact schema pass 为 `14/18 = 77.78%`，base 为 `0/18`；policy pass 从 base 的 `15/18 = 83.33%` 提升到 adapter 的 `18/18 = 100%`。该 schema 只覆盖七字段 model-facing contract，不等于完整 `SolutionResponseV2` 的端到端业务准确率。
 
 详细摘要见 [`data/results/colab/qlora/compact-experiment-20260909.json`](../data/results/colab/qlora/compact-experiment-20260909.json)。后续生产路径仍需对 compact 输出执行 evidence ID 绑定、完整 schema 校验、失败重试/人工审核和对抗集回归。
 

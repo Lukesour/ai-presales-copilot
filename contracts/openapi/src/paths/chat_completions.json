@@ -1,0 +1,51 @@
+{
+  "post": {
+    "operationId": "createChatCompletion",
+    "summary": "Start a requirements-first run through the chat facade.",
+    "parameters": [
+      {
+        "$ref": "../components/http-boundary.json#/parameters/IdempotencyKey"
+      },
+      {
+        "$ref": "../components/http-boundary.json#/parameters/ProjectHeader"
+      }
+    ],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "../components/chat.json#/schemas/ChatCompletionRequest"
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "OpenAI-compatible facade response containing the run identifier.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../components/chat.json#/schemas/ChatCompletionResponse"
+            }
+          }
+        }
+      },
+      "400": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "401": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "403": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "409": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "422": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      }
+    }
+  }
+}

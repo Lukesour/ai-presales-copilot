@@ -11,7 +11,7 @@ from typing import Any
 
 from ai_presales_copilot.compact_contract import validate_compact_solution_dict
 from ai_presales_copilot.finetuning import load_conversations, sha256_file
-from ai_presales_copilot.schemas import validate_solution_dict
+from ai_presales_copilot.schemas import SolutionResponseV2
 from ai_presales_copilot.security import inspect_output, inspect_sensitive_data
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,8 +30,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument(
         "--contract-profile",
-        choices=("full", "compact"),
-        default="full",
+        choices=("v2", "compact"),
+        default="compact",
         help="Schema used for scoring the model-facing output contract.",
     )
     parser.add_argument(
@@ -129,7 +129,7 @@ def main() -> int:
                     "Restart/delete the Colab runtime, rerun the notebook setup cell "
                     "(it removes preinstalled torchao), and then rerun evaluation. "
                     "If TorchAO is intentionally required, install a version compatible "
-                    "with the installed PyTorch instead of using the legacy package."
+                    "with the installed PyTorch instead of using the outdated optional package."
                 ) from exc
             raise
         # The base model is deliberately loaded on one device for this small
@@ -350,7 +350,7 @@ def _score_completion(
         if contract_profile == "compact":
             validate_compact_solution_dict(payload)
         else:
-            validate_solution_dict(payload, require_all_fields=True)
+            SolutionResponseV2.model_validate(payload)
         item["schema_pass"] = True
     except (TypeError, ValueError) as exc:
         item["error"] = str(exc)

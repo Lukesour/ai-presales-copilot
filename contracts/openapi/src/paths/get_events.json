@@ -1,0 +1,35 @@
+{
+  "parameters": [
+    {
+      "$ref": "../components/http-boundary.json#/parameters/RunId"
+    },
+    {
+      "$ref": "../components/http-boundary.json#/parameters/ProjectHeader"
+    }
+  ],
+  "get": {
+    "operationId": "listRunEvents",
+    "summary": "Read the append-only audit events for a run.",
+    "responses": {
+      "200": {
+        "description": "Run events.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../components/runs.json#/schemas/EventList"
+            }
+          }
+        }
+      },
+      "401": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "403": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "404": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      }
+    }
+  }
+}

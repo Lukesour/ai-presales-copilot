@@ -1,0 +1,138 @@
+{
+  "schemas": {
+    "RunState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "run_id", "state_version", "phase", "status"],
+      "properties": {
+        "schema_version": {
+          "const": "2.0"
+        },
+        "run_id": {
+          "type": ["string", "null"]
+        },
+        "trace_id": {
+          "type": ["string", "null"]
+        },
+        "thread_id": {
+          "type": ["string", "null"]
+        },
+        "tenant_id": {
+          "type": ["string", "null"]
+        },
+        "project_id": {
+          "type": ["string", "null"]
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["requirements", "solution"]
+        },
+        "status": {
+          "type": ["string", "null"],
+          "enum": [
+            "running",
+            "needs_clarification",
+            "ready_for_confirmation",
+            "rejected",
+            "needs_review",
+            "model_unavailable",
+            "failed",
+            "queued",
+            "waiting_for_review",
+            "complete",
+            null
+          ]
+        },
+        "current_node": {
+          "type": ["string", "null"]
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input": {
+          "type": ["object", "null"]
+        },
+        "input_turns": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "brief": {
+          "type": "object"
+        },
+        "requirement_facts": {
+          "type": "array",
+          "items": {
+            "$ref": "../components/requirements.json#/schemas/RequirementFact"
+          }
+        },
+        "requirement_conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "../components/requirements.json#/schemas/RequirementConflict"
+          }
+        },
+        "requirement_analysis": {
+          "type": "object"
+        },
+        "requirements_confirmed": {
+          "type": "boolean"
+        },
+        "extraction_mode": {
+          "type": "string"
+        },
+        "structured_schema_fallbacks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "response": {
+          "type": ["object", "null"]
+        },
+        "clarify": {
+          "type": "object"
+        },
+        "review": {
+          "type": ["object", "null"]
+        },
+        "errors": {
+          "type": "array",
+          "items": {}
+        },
+        "error_code": {
+          "type": ["string", "null"]
+        },
+        "feedback": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "created_at": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "EventList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "events"],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}

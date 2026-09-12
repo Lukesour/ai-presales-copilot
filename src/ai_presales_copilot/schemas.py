@@ -2,202 +2,14 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Priority = Literal["must", "should", "nice_to_have"]
 ReviewStatus = Literal["not_required", "pending", "approved", "rejected"]
-REQUIRED_RESPONSE_FIELDS = (
-    "case_id",
-    "executive_summary",
-    "requirements",
-    "recommendation",
-    "architecture",
-    "implementation_steps",
-    "risks",
-    "clarifying_questions",
-    "evidence",
-    "poc_plan",
-    "model_strategy",
-    "assumptions",
-    "review_status",
-)
-
-
-@dataclass(frozen=True)
-class CustomerBrief:
-    """A normalized customer brief used by the demo and evaluation harness."""
-
-    case_id: str
-    industry: str
-    use_case: str
-    data_types: list[str] = field(default_factory=list)
-    deployment: str = "未说明"
-    concurrency: str = "未说明"
-    latency_requirement: str = "未说明"
-    compliance: list[str] = field(default_factory=list)
-    budget: str = "未说明"
-    raw_request: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class Requirement:
-    """One explicit or inferred customer constraint."""
-
-    name: str
-    value: str
-    priority: Priority = "should"
-    source: str = "customer_brief"
-
-
-@dataclass(frozen=True)
-class Evidence:
-    """A claim-supporting excerpt or a deliberate no-evidence marker."""
-
-    evidence_id: str
-    title: str
-    excerpt: str
-    source_path: str
-    relevance: float = 0.0
-    source_id: str | None = None
-    source_url: str | None = None
-    version: str | None = None
-    license: str | None = None
-    page: int | None = None
-    locator: str | None = None
-    content_hash: str | None = None
-    fetched_at: str | None = None
-    effective_from: str | None = None
-    effective_to: str | None = None
-    tenant_id: str = "public"
-    acl: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class RiskFlag:
-    """A risk that should be disclosed instead of hidden in a sales answer."""
-
-    category: str
-    description: str
-    severity: Literal["low", "medium", "high"] = "medium"
-    action: str = "补充确认"
-
-
-@dataclass
-class SolutionResponse:
-    """The response contract expected from Dify or the local deterministic demo."""
-
-    case_id: str
-    executive_summary: str
-    requirements: list[Requirement] = field(default_factory=list)
-    recommendation: list[str] = field(default_factory=list)
-    architecture: list[str] = field(default_factory=list)
-    implementation_steps: list[str] = field(default_factory=list)
-    risks: list[RiskFlag] = field(default_factory=list)
-    clarifying_questions: list[str] = field(default_factory=list)
-    evidence: list[Evidence] = field(default_factory=list)
-    poc_plan: list[dict[str, Any]] = field(default_factory=list)
-    model_strategy: dict[str, Any] = field(default_factory=dict)
-    assumptions: list[str] = field(default_factory=list)
-    review_status: ReviewStatus = "not_required"
-    model_name: str = "mock"
-    latency_ms: float | None = None
-    usage: dict[str, Any] = field(default_factory=dict)
-    run_id: str | None = None
-    trace_id: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-def _require_string(value: Any, field_name: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string")
-
-
-def validate_solution_dict(
-    payload: dict[str, Any], *, require_all_fields: bool = False
-) -> None:
-    """Validate the response shape without requiring Pydantic.
-
-    The default remains backward-compatible for partial Dify error payloads.
-    Model quality gates and training targets should set ``require_all_fields``
-    so a syntactically valid but incomplete object cannot pass the schema gate.
-    """
-
-    if not isinstance(payload, dict):
-        raise TypeError("solution response must be an object")
-    if require_all_fields:
-        missing = [field for field in REQUIRED_RESPONSE_FIELDS if field not in payload]
-        if missing:
-            raise ValueError("missing required response fields: " + ", ".join(missing))
-    for field_name in ("case_id", "executive_summary"):
-        _require_string(payload.get(field_name), field_name)
-    for list_field in (
-        "requirements",
-        "recommendation",
-        "architecture",
-        "implementation_steps",
-        "risks",
-        "clarifying_questions",
-        "evidence",
-    ):
-        if not isinstance(payload.get(list_field, []), list):
-            raise TypeError(f"{list_field} must be an array")
-    status = payload.get("review_status", "not_required")
-    if status not in {"not_required", "pending", "approved", "rejected"}:
-        raise ValueError(f"unsupported review_status: {status}")
-    for item in payload.get("evidence", []):
-        if not isinstance(item, dict):
-            raise TypeError("each evidence item must be an object")
-        for field_name in ("evidence_id", "title", "excerpt", "source_path"):
-            _require_string(item.get(field_name), f"evidence.{field_name}")
-        if "relevance" in item and (
-            not isinstance(item["relevance"], (int, float))
-            or not 0 <= float(item["relevance"]) <= 1
-        ):
-            raise ValueError("evidence.relevance must be between 0 and 1")
-    for item in payload.get("requirements", []):
-        if not isinstance(item, dict):
-            raise TypeError("each requirement must be an object")
-        for field_name in ("name", "value", "priority", "source"):
-            _require_string(item.get(field_name), f"requirements.{field_name}")
-        if item["priority"] not in {"must", "should", "nice_to_have"}:
-            raise ValueError(f"unsupported requirement priority: {item['priority']}")
-    for item in payload.get("risks", []):
-        if not isinstance(item, dict):
-            raise TypeError("each risk must be an object")
-        for field_name in ("category", "description", "severity", "action"):
-            _require_string(item.get(field_name), f"risks.{field_name}")
-        if item["severity"] not in {"low", "medium", "high"}:
-            raise ValueError(f"unsupported risk severity: {item['severity']}")
-    for field_name in ("poc_plan", "assumptions"):
-        if field_name in payload and not isinstance(payload[field_name], list):
-            raise TypeError(f"{field_name} must be an array")
-    for item in payload.get("poc_plan", []):
-        if not isinstance(item, dict):
-            raise TypeError("each poc_plan item must be an object")
-        for field_name in ("phase", "objective", "exit_criteria"):
-            _require_string(item.get(field_name), f"poc_plan.{field_name}")
-    if "model_strategy" in payload and not isinstance(payload["model_strategy"], dict):
-        raise TypeError("model_strategy must be an object")
-    if "assumptions" in payload and any(not isinstance(item, str) for item in payload["assumptions"]):
-        raise TypeError("assumptions items must be strings")
-
-
 # ---------------------------------------------------------------------------
 # Versioned, strict v2 contracts used by the local-model runtime.
-#
-# The original dataclasses remain available for backwards-compatible fixtures
-# and the deterministic test harness.  New API and LLM code should use these
-# models so that the JSON Schema, runtime validation, and persisted payloads
-# share one source of truth.
 # ---------------------------------------------------------------------------
 
 
@@ -232,7 +44,9 @@ class DataGovernanceRequirements(StrictModel):
     residency: str | None = None
     egress_allowed: bool | None = None
     retention_days: int | None = Field(default=None, ge=0)
-    audit_required: bool = False
+    # ``None`` means the customer has not answered the audit question yet;
+    # ``False`` is an explicit answer and must not be collapsed into missing.
+    audit_required: bool | None = None
     allowed_roles: list[str] = Field(default_factory=list)
 
 
@@ -240,66 +54,182 @@ class CustomerBriefV2(StrictModel):
     schema_version: Literal["2.0"] = "2.0"
     case_id: str = Field(min_length=1, max_length=128)
     industry: str = Field(min_length=1, max_length=256)
+    business_goal: str | None = Field(default=None, max_length=2_000)
     use_case: str = Field(min_length=1, max_length=512)
+    target_users: list[str] = Field(default_factory=list, max_length=64)
+    current_process: str | None = Field(default=None, max_length=2_000)
     data_types: list[str] = Field(default_factory=list, max_length=64)
     deployment: str = Field(default="未说明", max_length=128)
     capacity: CapacityRequirements = Field(default_factory=CapacityRequirements)
     governance: DataGovernanceRequirements = Field(default_factory=DataGovernanceRequirements)
     budget: str = Field(default="未说明", max_length=256)
+    timeline: str | None = Field(default=None, max_length=256)
     integrations: list[str] = Field(default_factory=list, max_length=64)
     acceptance_criteria: list[str] = Field(default_factory=list, max_length=64)
     raw_request: str = Field(default="", max_length=20_000)
 
-    @classmethod
-    def from_legacy(cls, brief: CustomerBrief) -> CustomerBriefV2:
-        capacity = _legacy_capacity(brief.concurrency)
-        latency = _legacy_latency(brief.latency_requirement)
-        return cls(
-            case_id=brief.case_id,
-            industry=brief.industry,
-            use_case=brief.use_case,
-            data_types=brief.data_types,
-            deployment=brief.deployment,
-            capacity=CapacityRequirements(**capacity, **latency),
-            governance=DataGovernanceRequirements(
-                residency=";".join(brief.compliance) if brief.compliance else None,
-                egress_allowed=False if "数据不能出域" in brief.compliance else None,
-                audit_required=any("审计" in item for item in brief.compliance),
-            ),
-            budget=brief.budget,
-            raw_request=brief.raw_request,
-        )
+class IntakeBriefV2(StrictModel):
+    """Nullable brief produced from an unstructured customer request.
 
-    def to_legacy(self) -> CustomerBrief:
-        concurrency = (
-            f"峰值 {self.capacity.peak_concurrency}"
-            if self.capacity.peak_concurrency is not None
-            else "未说明"
-        )
-        latency = (
-            f"完整答案 {self.capacity.full_answer_target_ms} 毫秒"
-            if self.capacity.full_answer_target_ms is not None
-            else "未说明"
-        )
-        compliance: list[str] = []
-        if self.governance.residency:
-            compliance.append(self.governance.residency)
-        if self.governance.egress_allowed is False:
-            compliance.append("数据不能出域")
-        if self.governance.audit_required:
-            compliance.append("审计日志")
-        return CustomerBrief(
-            case_id=self.case_id,
-            industry=self.industry,
-            use_case=self.use_case,
-            data_types=list(self.data_types),
-            deployment=self.deployment,
-            concurrency=concurrency,
-            latency_requirement=latency,
-            compliance=compliance,
-            budget=self.budget,
-            raw_request=self.raw_request,
-        )
+    Intake must be able to represent an unknown value without using the
+    ``未说明`` sentinel, so the requirements-first workflow uses this model
+    until the customer confirms the brief.
+    """
+
+    schema_version: Literal["2.0"] = "2.0"
+    case_id: str = Field(min_length=1, max_length=128)
+    industry: str | None = Field(default=None, max_length=256)
+    business_goal: str | None = Field(default=None, max_length=2_000)
+    use_case: str | None = Field(default=None, max_length=512)
+    target_users: list[str] = Field(default_factory=list, max_length=64)
+    current_process: str | None = Field(default=None, max_length=2_000)
+    data_types: list[str] = Field(default_factory=list, max_length=64)
+    deployment: str | None = Field(default=None, max_length=128)
+    capacity: CapacityRequirements = Field(default_factory=CapacityRequirements)
+    governance: DataGovernanceRequirements = Field(default_factory=DataGovernanceRequirements)
+    budget: str | None = Field(default=None, max_length=256)
+    timeline: str | None = Field(default=None, max_length=256)
+    integrations: list[str] = Field(default_factory=list, max_length=64)
+    acceptance_criteria: list[str] = Field(default_factory=list, max_length=64)
+    raw_request: str = Field(default="", max_length=20_000)
+
+
+RequirementFactStatus = Literal[
+    "stated", "confirmed", "inferred", "missing", "ambiguous", "conflicting"
+]
+RequirementImportance = Literal["blocking", "warning"]
+
+
+class CustomerInputV2(StrictModel):
+    """The only formal input required to start a requirements-first run."""
+
+    raw_request: str = Field(min_length=1, max_length=20_000)
+    source: Literal["meeting_notes", "email", "chat", "form", "other"] = "chat"
+    locale: str = Field(default="zh-CN", min_length=2, max_length=32)
+    received_at: str | None = None
+
+class InputTurnV2(StrictModel):
+    """One immutable customer or clarification message."""
+
+    turn_id: str = Field(min_length=1, max_length=128)
+    role: Literal["customer", "presales"] = "customer"
+    content: str = Field(min_length=1, max_length=20_000)
+    source: Literal["initial", "clarification", "form_edit"] = "initial"
+    created_at: str
+
+
+class RequirementFactV2(StrictModel):
+    """A field-level extraction with an auditable source attribution."""
+
+    field_path: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=128)
+    value_text: str | None = Field(default=None, max_length=2_000)
+    status: RequirementFactStatus
+    importance: RequirementImportance
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    source_turn_id: str | None = Field(default=None, max_length=128)
+    source_quote: str | None = Field(default=None, max_length=2_000)
+    start_char: int | None = Field(default=None, ge=0)
+    end_char: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_attribution(self) -> RequirementFactV2:
+        if self.status in {"stated", "confirmed"} and (
+            not self.source_turn_id or not self.source_quote
+        ):
+            raise ValueError("stated or confirmed facts require source_turn_id and source_quote")
+        if (self.start_char is None) != (self.end_char is None):
+            raise ValueError("start_char and end_char must be provided together")
+        if (
+            self.start_char is not None
+            and self.end_char is not None
+            and self.end_char < self.start_char
+        ):
+            raise ValueError("end_char must be greater than or equal to start_char")
+        return self
+
+
+class RequirementConflictV2(StrictModel):
+    field_path: str = Field(min_length=1, max_length=128)
+    description: str = Field(min_length=1, max_length=2_000)
+    source_turn_ids: list[str] = Field(default_factory=list, max_length=16)
+    resolution_question: str = Field(min_length=1, max_length=1_000)
+
+
+class RequirementExtractionV2(StrictModel):
+    """Model-facing extraction result; readiness is computed by host code."""
+
+    schema_version: Literal["2.0"] = "2.0"
+    brief: IntakeBriefV2
+    facts: list[RequirementFactV2] = Field(default_factory=list, max_length=128)
+    conflicts: list[RequirementConflictV2] = Field(default_factory=list, max_length=32)
+    assumptions: list[str] = Field(default_factory=list, max_length=64)
+
+
+class ClarificationQuestionV2(StrictModel):
+    question_id: str = Field(min_length=1, max_length=128)
+    field_path: str = Field(min_length=1, max_length=128)
+    question: str = Field(min_length=1, max_length=1_000)
+    why_it_matters: str = Field(min_length=1, max_length=1_000)
+    importance: RequirementImportance
+    answer_type: Literal["text", "choice", "number", "boolean", "list"] = "text"
+    choices: list[str] = Field(default_factory=list, max_length=32)
+
+
+class RequirementAssessmentV2(StrictModel):
+    """Deterministic completeness projection shown to the user."""
+
+    ready_for_confirmation: bool = False
+    blocking_fields: list[str] = Field(default_factory=list, max_length=32)
+    warning_fields: list[str] = Field(default_factory=list, max_length=64)
+    conflicts: list[RequirementConflictV2] = Field(default_factory=list, max_length=32)
+    questions: list[ClarificationQuestionV2] = Field(default_factory=list, max_length=16)
+    clarification_turns: int = Field(default=0, ge=0, le=3)
+    max_clarification_turns: int = Field(default=3, ge=1, le=3)
+
+
+class RequirementOverrideV2(StrictModel):
+    field_path: str = Field(min_length=1, max_length=128)
+    value_text: str = Field(min_length=1, max_length=2_000)
+
+
+class RunInputRequestV2(StrictModel):
+    input: CustomerInputV2
+    source: Literal["meeting_notes", "email", "chat", "form", "other"] | None = None
+
+
+class ClarificationRequestV2(StrictModel):
+    message: str = Field(min_length=1, max_length=20_000)
+    overrides: list[RequirementOverrideV2] = Field(default_factory=list, max_length=32)
+    expected_state_version: int | None = Field(default=None, ge=0)
+    state_version: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def normalize_state_version(self) -> ClarificationRequestV2:
+        if (
+            self.expected_state_version is not None
+            and self.state_version is not None
+            and self.expected_state_version != self.state_version
+        ):
+            raise ValueError("expected_state_version and state_version must match")
+        return self
+
+
+class RequirementConfirmRequestV2(StrictModel):
+    decision: Literal["confirm"] = "confirm"
+    acknowledged_warnings: list[str] = Field(default_factory=list, max_length=64)
+    expected_state_version: int | None = Field(default=None, ge=0)
+    state_version: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def normalize_state_version(self) -> RequirementConfirmRequestV2:
+        if (
+            self.expected_state_version is not None
+            and self.state_version is not None
+            and self.expected_state_version != self.state_version
+        ):
+            raise ValueError("expected_state_version and state_version must match")
+        return self
 
 
 class RequirementV2(StrictModel):
@@ -455,41 +385,3 @@ class SolutionDraftV2(StrictModel):
     model_strategy: dict[str, Any] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list, max_length=128)
     review: ReviewV2 = Field(default_factory=ReviewV2)
-
-
-def _extract_int(value: str) -> int | None:
-    match = re.search(r"(\d+)", value or "")
-    return int(match.group(1)) if match else None
-
-
-def _legacy_capacity(value: str) -> dict[str, int]:
-    """Map legacy free text to explicit v2 volume fields without guessing units."""
-
-    source = value or ""
-    quantity = _extract_int(source)
-    if quantity is None:
-        return {}
-    if re.search(r"日请求|daily", source, re.IGNORECASE):
-        return {"daily_requests": quantity}
-    peak = re.search(r"(?:峰值|peak)\s*[:：]?\s*(\d+)", source, re.IGNORECASE)
-    if peak:
-        return {"peak_concurrency": int(peak.group(1))}
-    return {"peak_concurrency": quantity}
-
-
-def _legacy_latency(value: str) -> dict[str, int]:
-    """Convert legacy seconds/milliseconds text to the matching v2 target."""
-
-    source = value or ""
-    number = re.search(r"(\d+(?:\.\d+)?)\s*(毫秒|ms|秒|s|分钟|分)?", source, re.IGNORECASE)
-    if not number:
-        return {}
-    amount = float(number.group(1))
-    unit = (number.group(2) or "秒").lower()
-    multiplier = 60_000 if unit in {"分钟", "分"} else 1_000
-    if unit in {"毫秒", "ms"}:
-        multiplier = 1
-    target_ms = int(amount * multiplier)
-    if re.search(r"首\s*token|首字|ttft", source, re.IGNORECASE):
-        return {"ttft_target_ms": target_ms}
-    return {"full_answer_target_ms": target_ms}

@@ -1,0 +1,59 @@
+{
+  "parameters": [
+    {
+      "$ref": "../components/http-boundary.json#/parameters/RunId"
+    },
+    {
+      "$ref": "../components/http-boundary.json#/parameters/ProjectHeader"
+    }
+  ],
+  "post": {
+    "operationId": "reviewRun",
+    "summary": "Approve or reject a run waiting for human review.",
+    "parameters": [
+      {
+        "$ref": "../components/http-boundary.json#/parameters/IdempotencyKey"
+      }
+    ],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "../components/reviews.json#/schemas/ReviewRequest"
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Updated run state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../components/runs.json#/schemas/RunState"
+            }
+          }
+        }
+      },
+      "400": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "401": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "403": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "404": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "409": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      },
+      "422": {
+        "$ref": "../components/http-boundary.json#/responses/Problem"
+      }
+    }
+  }
+}

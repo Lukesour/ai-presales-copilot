@@ -4,18 +4,22 @@
 
 本项目解决的是“如何把 AI 能力变成可审核、可验收的售前方案”，不是面向一线工程师的终端问答产品。终端运维助手作为独立项目维护。
 
-## 第一阶段运行闭环
+## 求职演示主线：需求优先
 
 ```text
-intake → clarify → query_rewrite → retrieve → draft → ground_claims
+客户原始需求 → intake → extract_requirements → assess_requirements
+      → clarify / requirements_confirmation
+      → query_rewrite → retrieve → draft → ground_claims
       → critic → repair(最多 1 次) → risk_gate → human_review → finalize
 ```
 
-第一阶段固定为 Docker Compose + 本地 Qwen3-8B GGUF（默认 Q4）+ llama-server + PostgreSQL/pgvector。模型权重不进 Git；没有可用模型或结构化输出非法时，结果是 `model_unavailable`，不会回退到固定模板伪造方案。
+正式入口先接收客户原始文本或会议纪要，不接受已经填好的完整 Brief 作为新流程入口。系统展示字段状态、置信度、原文引用、缺失/冲突/警告；关键字段未补齐或未确认时，不会检索企业知识，也不会生成方案。项目只维护 `/v2` 公共 API；Dify 和 llama-server 的上游 `/v1` 协议属于外部边界。
+
+第一阶段固定为 Docker Compose + 本地 Qwen3-8B GGUF（默认 Q4）+ llama-server + PostgreSQL/pgvector。模型权重不进 Git；方案节点没有可用模型或结构化输出非法时，结果是 `model_unavailable`，不会回退到固定模板伪造方案。需求抽取失败时只允许进入标记为 `deterministic_fallback` 的保守原文匹配路径，仍停在需求澄清/确认门，不会生成方案。
 
 ## 可运行能力
 
-- Pydantic v2 严格 v2 契约、证据 ID 绑定、来源版本/许可/ACL 字段
+- Pydantic v2 严格 v2 契约、原始输入/轮次/字段事实溯源、证据 ID 绑定、来源版本/许可/ACL 字段
 - 真实 LangGraph 编排、PostgreSQL 原生 `PostgresSaver` interrupt/resume、SQLite 测试回退、乐观锁和审核幂等
 - FastAPI：认证、租户/项目上下文、RBAC、统一错误、request ID、events/feedback
 - llama-server OpenAI-compatible 客户端、JSON Schema 请求和客户端二次校验
@@ -30,11 +34,11 @@ intake → clarify → query_rewrite → retrieve → draft → ground_claims
 ```text
 src/ai_presales_copilot/  售前 Agent、契约、检索、API、持久化和安全策略
 data/knowledge/           合成产品、部署、安全和检索资料
-data/demo/                三个合成演示案例和脱敏 Replay 快照
+data/demo/                合成演示案例和需求优先脱敏 Replay 快照
 data/evaluation/          客户需求黄金案例
 data/finetuning/          版本化微调数据与 manifest
 dify/                     Dify 工作流说明和响应契约
-scripts/                  Demo、评测、Agent、训练和基准脚本
+scripts/                  Demo、评测、训练、契约和基准脚本
 docs/                     架构、POC、部署、面试和安全材料
 tests/                    不依赖外部服务的自动化测试
 ```
@@ -44,8 +48,8 @@ tests/                    不依赖外部服务的自动化测试
 ```bash
 uv sync --locked --extra runtime --extra dev
 
-uv run pytest -q
-uv run ruff check src scripts tests
+PYTHONPATH=src:. uv run --locked --extra runtime --extra dev pytest -q
+PYTHONPATH=src:. uv run --locked --extra runtime --extra dev ruff check src scripts tests demo/gradio_app.py
 uv run python scripts/ingest_sources.py --chunks /tmp/chunks.jsonl --manifest /tmp/manifest.jsonl
 ```
 
@@ -58,27 +62,7 @@ uv sync --locked --extra runtime --extra dev --extra knowledge
 运行正式 API Demo（需先启动上面的 Compose，并准备本地模型）：
 
 ```bash
-uv run python scripts/run_demo.py --case-id case-001 --mode api --review approve
-```
-
-离线规则引擎只用于回归检查，必须显式标记为 fixture：
-
-```bash
-uv run python scripts/run_demo.py --case-id case-001 --mode fixture
-```
-
-运行带人工审核的 Agent：
-
-```bash
-PYTHONPATH=src python scripts/run_agent.py \
-  --case-id case-001 \
-  --db .runtime/agent/demo.db \
-  --trace .runtime/agent/case-001.jsonl
-
-PYTHONPATH=src python scripts/run_agent.py \
-  --case-id case-001 \
-  --approve \
-  --db .runtime/agent/demo.db
+uv run python scripts/run_demo.py --case-id demo-normal-001 --mode replay
 ```
 
 启动 Phase 1 Compose（需要先准备模型文件）：
@@ -101,24 +85,28 @@ PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
   uv run python scripts/serve_agent.py --allow-dev-auth --port 8090
 ```
 
-创建一条结构化 run：
+创建一条需求优先 run：
 
 ```bash
-curl -s http://127.0.0.1:8090/v1/projects/manufacturing/runs \
+curl -s http://127.0.0.1:8090/v2/projects/manufacturing/runs \
   -H 'Authorization: Bearer dev-token' \
   -H 'Idempotency-Key: demo-run-001' \
   -H 'X-Tenant-ID: local' -H 'X-User-ID: presales-demo' -H 'X-Roles: presales' \
   -H 'Content-Type: application/json' \
-  -d '{"brief":{"schema_version":"2.0","case_id":"manufacturing-001","industry":"制造业","use_case":"设备运维知识助手","data_types":["维修手册 PDF","历史工单"],"deployment":"私有化","capacity":{"peak_concurrency":5,"full_answer_target_ms":10000},"governance":{"egress_allowed":false,"audit_required":true},"raw_request":"请给出可引用、可审计的设备故障问答 POC。"}}'
+  -d '{"input":{"raw_request":"客户希望把维修手册和历史工单做成设备运维知识助手，回答必须可引用。","source":"meeting_notes"},"source":"meeting_notes"}'
 ```
+
+响应先可能是 `needs_clarification` 或 `ready_for_confirmation`。补充信息使用
+`POST /v2/runs/<run_id>/clarifications`，确认后使用
+`POST /v2/runs/<run_id>/requirements/confirm`；澄清、确认、审核和反馈写接口都携带新的 `Idempotency-Key` 和响应中的 `state_version`。
 
 高风险 run 会返回 `waiting_for_review`。审核必须使用 `reviewer`/`admin` 角色和新的幂等键：
 
 ```bash
-curl -s http://127.0.0.1:8090/v1/runs/<run_id>/reviews \
+curl -s http://127.0.0.1:8090/v2/runs/<run_id>/reviews \
   -H 'Authorization: Bearer dev-token' -H 'X-Roles: reviewer' \
   -H 'Idempotency-Key: demo-review-001' -H 'Content-Type: application/json' \
-  -d '{"decision":"approve","reason":"已核对部署边界和引用"}'
+  -d '{"decision":"approve","reason":"已核对部署边界和引用","state_version":12}' # 替换为响应中的 state_version
 ```
 
 启动 Gradio 页面（调用正式 API，不直接操作 Agent）：
@@ -128,7 +116,7 @@ uv sync --locked --extra demo
 PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
 ```
 
-Gradio 页面默认使用 `Live API`。页面加载、刷新和每次实时生成前都会检查 `/readyz`；
+Gradio 页面默认使用 `Demo Replay`，首屏先展示一条登记过的合成客户原始需求；页面不再提供场景下拉框或“辅助示例”按钮，避免把预填 Brief 误认为正式输入入口。切换到 `Live API` 后，页面加载、刷新和每次实时分析前都会检查 `/readyz`。
 如果数据库、知识库或模型未就绪，会阻止创建 run，但不会影响 `Demo Replay`。
 
 无模型或无 API 环境也可以直接运行求职演示：
@@ -138,7 +126,7 @@ PYTHONPATH=src python scripts/check_demo_replays.py
 PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
 ```
 
-页面切换到 `Demo Replay` 后，可展示正常、信息缺失和高风险审核三个合成案例。
+Replay 仍保留正常、信息缺失后补充、高风险审核和冲突/注入阻断四条离线验收分支，但只通过仓库校验和环境变量选择，不作为首屏输入控件。需要查看其他登记分支时，可在启动前设置 `PRESALES_REPLAY_CASE=high_risk`。任意新文本必须切换到 `Live API`。
 Replay 是静态快照，不访问 API、数据库或模型，也不代表生产模型效果。
 
 重新从可用的正式 API 捕获快照（不会自动覆盖已有文件）：
@@ -173,7 +161,7 @@ Compose 环境请按 [`deploy/README.md`](deploy/README.md) 同时撤回 Postgre
 - 产品事实必须绑定知识库证据，不把模型记忆当作承诺。
 - 缺少部署、容量、合规或产品证据时，输出风险和待确认问题。
 - 高风险结论必须经过人工审核，Agent 不直接修改生产系统或外发消息。
-- `mock`/旧规则 Agent 只保留为测试 fixture；对外演示入口是 `local-model` API。
+- 对外演示入口是 `local-model` API 或当前 Replay。需求抽取的确定性 fallback 只负责保守识别原文事实，不是方案模板，也不能绕过确认门。
 - 合成案例和本机基准只用于工程演示，不代表客户生产准确率、SLA 或容量。
 - 模型微调只承载稳定的格式、分类和决策行为，持续变化的事实由 RAG 提供。
 

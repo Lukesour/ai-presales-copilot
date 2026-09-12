@@ -1,97 +1,53 @@
 #!/usr/bin/env python3
-"""Build deterministic, synthetic conversational data for the QLoRA POC."""
+"""Build current v2 conversational data from validated Replay snapshots."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from ai_presales_copilot.agent import PresalesAgent
 from ai_presales_copilot.compact_contract import (
     COMPACT_SYSTEM_PROMPT,
     compact_target_from_payload,
     validate_compact_solution_dict,
 )
-from ai_presales_copilot.evaluation import load_cases
-from ai_presales_copilot.finetuning import dataset_stats, validate_conversation, write_manifest
-from ai_presales_copilot.knowledge import KnowledgeBase
-from ai_presales_copilot.persistence import CheckpointStore
-from ai_presales_copilot.schemas import validate_solution_dict
+from ai_presales_copilot.evaluation import load_replays
+from ai_presales_copilot.finetuning import (
+    dataset_stats,
+    sha256_file,
+    validate_conversation,
+    write_manifest,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
-SYSTEM_PROMPT = (
-    "你是企业 AI 解决方案售前顾问。你必须只输出一个合法 JSON 对象：第一个字符是 {，"
-    "最后一个字符是 }；禁止 Markdown、代码围栏和解释性文字。"
-    "JSON 必须包含字段：case_id、executive_summary、requirements、recommendation、architecture、"
-    "implementation_steps、risks、clarifying_questions、evidence、poc_plan、model_strategy、"
-    "assumptions、review_status。只能根据客户输入和检索上下文回答；没有证据时写入风险或待确认问题。"
-    "不要编造价格、SLA、准确率、认证或容量；资料不足时保持保守。"
-)
-SYSTEM_PROMPT_VERSION = "v2-json-contract-rag-context"
-COMPACT_SYSTEM_PROMPT_VERSION = "v1-compact-decision-contract-rag-context"
-
-# Keep the target complete enough to exercise the public response contract,
-# while removing runtime-only fields and avoiding pretty-printed whitespace.
-# This makes the supervised signal about stable behavior and format rather than
-# about a particular execution trace.
-PUBLIC_TARGET_FIELDS = (
-    "case_id",
-    "executive_summary",
-    "requirements",
-    "recommendation",
-    "architecture",
-    "implementation_steps",
-    "risks",
-    "clarifying_questions",
-    "evidence",
-    "poc_plan",
-    "model_strategy",
-    "assumptions",
-    "review_status",
-)
+SYSTEM_PROMPT_VERSION = "v2-requirements-first-compact-rag-context"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "data/finetuning")
     parser.add_argument("--variants", type=int, default=3, choices=(1, 2, 3))
-    parser.add_argument(
-        "--target-profile",
-        choices=("full", "compact"),
-        default="full",
-        help=(
-            "full regenerates the public response contract; compact trains only the "
-            "small model-facing decision contract and lets the deterministic Agent "
-            "own the long POC/model-strategy fields."
-        ),
-    )
     args = parser.parse_args()
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    cases = load_cases(ROOT / "data/evaluation/cases.jsonl")
-    examples = _build_examples(cases, args.variants, args.target_profile)
+    replays = load_replays(ROOT / "data/demo/replays", ROOT / "data/demo/scenarios.json")
+    examples = _build_examples(replays, args.variants)
     for item in examples:
         validate_conversation(item)
 
-    # Split by source case, so variants of one customer brief never leak across splits.
-    buckets = {"train": [], "dev": [], "test": []}
+    buckets: dict[str, list[dict[str, Any]]] = {"train": [], "dev": [], "test": []}
+    scenario_order = list(dict.fromkeys(item["metadata"]["scenario_id"] for item in examples))
     for item in examples:
-        source_case = item["metadata"]["case_id"]
-        stable_bucket = _stable_bucket(source_case)
-        bucket = "test" if stable_bucket < 2 else "dev" if stable_bucket < 4 else "train"
+        position = scenario_order.index(item["metadata"]["scenario_id"])
+        bucket = "test" if position == 0 else "dev" if position == 1 else "train"
         buckets[bucket].append(item)
 
     files: dict[str, Path] = {}
     for name, rows in buckets.items():
         path = output_dir / f"{name}.jsonl"
-        path.write_text(
-            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8"
-        )
+        path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
         files[name] = path
 
     llama_dir = output_dir / "llamafactory"
@@ -119,17 +75,22 @@ def main() -> int:
         files=files,
         metadata={
             "generator": "scripts/build_finetune_dataset.py",
-            "system_prompt_version": (
-                SYSTEM_PROMPT_VERSION
-                if args.target_profile == "full"
-                else COMPACT_SYSTEM_PROMPT_VERSION
-            ),
-            "input_context_version": "v1-structured-brief-and-retrieved-evidence",
+            "synthetic": True,
+            "source": "data/demo/replays/",
+            "source_version": "v2-requirements-first-replay",
+            "source_manifest": "data/evaluation/manifest.json",
+            "source_manifest_sha256": sha256_file(ROOT / "data/evaluation/manifest.json"),
+            "license": "internal-synthetic",
+            "sensitivity": "non-sensitive",
+            "purpose": "fine-tuning-experiment",
+            "created_at": "2026-09-11",
+            "system_prompt_version": SYSTEM_PROMPT_VERSION,
+            "input_context_version": "v2-requirements-first-replay",
             "target_format": "compact_json",
-            "target_profile": args.target_profile,
+            "target_profile": "compact",
             "variants": args.variants,
-            "source_cases": len(cases),
-            "split_policy": "deterministic case-level split: test/dev/train",
+            "source_cases": len(replays),
+            "split_policy": "deterministic scenario-level split: test/dev/train",
             "stats": {name: dataset_stats(rows) for name, rows in buckets.items()},
         },
     )
@@ -137,101 +98,53 @@ def main() -> int:
     return 0
 
 
-def _build_examples(cases: list[Any], variants: int, target_profile: str) -> list[dict[str, Any]]:
+def _build_examples(replays: list[Any], variants: int) -> list[dict[str, Any]]:
     examples: list[dict[str, Any]] = []
-    knowledge_base = KnowledgeBase(ROOT / "data/knowledge")
-    system_prompt = SYSTEM_PROMPT if target_profile == "full" else COMPACT_SYSTEM_PROMPT
-    for case in cases:
-        with CheckpointStore(":memory:") as store:
-            state = PresalesAgent(knowledge_base, store).run(
-                case, thread_id=f"dataset:{case.case_id}"
-            )
-            if state.response is None:
-                raise RuntimeError(f"Agent did not produce a response for {case.case_id}")
-            if target_profile == "full":
-                target = _training_target(state.response.to_dict())
-                validate_solution_dict(target, require_all_fields=True)
-            elif target_profile == "compact":
-                target = compact_target_from_payload(state.response.to_dict())
-                validate_compact_solution_dict(target)
-            else:  # pragma: no cover - argparse constrains this value
-                raise ValueError(f"unsupported target profile: {target_profile}")
-            answer = json.dumps(
-                target,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            model_input = _format_model_input(case, state.evidence)
+    for replay in replays:
+        response = replay.states.final.get("response")
+        target = compact_target_from_payload(response)
+        validate_compact_solution_dict(target)
+        answer = json.dumps(target, ensure_ascii=False, separators=(",", ":"))
+        model_input = _format_model_input(replay)
         prompts = [
-            f"请根据以下客户输入和检索上下文输出结构化方案：\n{model_input}",
-            f"请先提取约束，再为以下客户设计 POC：\n{model_input}",
-            f"请审慎检查风险后回答，不要做未经证据支持的承诺：\n{model_input}",
+            f"请根据当前需求和检索证据输出结构化决策：\n{model_input}",
+            f"请先检查需求门，再给出保守的方案决策：\n{model_input}",
+            f"请只引用当前证据并标注风险：\n{model_input}",
         ][:variants]
         for index, prompt in enumerate(prompts, start=1):
             examples.append(
                 {
-                    "id": f"{case.case_id}-v{index}",
+                    "id": f"{replay.scenario_id}-v{index}",
                     "messages": [
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": COMPACT_SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                         {"role": "assistant", "content": answer},
                     ],
-                    "metadata": {"case_id": case.case_id, "variant": index},
+                    "metadata": {
+                        "scenario_id": replay.scenario_id,
+                        "case_id": replay.case_id,
+                        "variant": index,
+                        "synthetic": replay.synthetic,
+                        "source_replay_schema": replay.replay_schema_version,
+                        "source_replay_path": f"data/demo/replays/{replay.scenario_id}.json",
+                        "license": "internal-synthetic",
+                        "sensitivity": "non-sensitive",
+                    },
                 }
             )
     return examples
 
 
-def _stable_bucket(value: str) -> int:
-    return int(hashlib.sha256(value.encode("utf-8")).hexdigest()[:8], 16) % 10
-
-
-def _training_target(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a compact, stable target for the supervised behavior contract."""
-
-    target = {field: payload[field] for field in PUBLIC_TARGET_FIELDS if field in payload}
-    target["evidence"] = target.get("evidence", [])[:3]
-    for item in target.get("evidence", []):
-        if isinstance(item, dict) and isinstance(item.get("excerpt"), str):
-            # The model should learn to cite evidence, not memorize long
-            # document chunks. Runtime retrieval remains the source of truth.
-            item["excerpt"] = item["excerpt"][:180]
-    return target
-
-
-def _format_model_input(case: Any, evidence: list[Any]) -> str:
-    """Serialize the same structured brief/RAG context used by the SFT task.
-
-    The case-level split still prevents the answer from being memorized, while
-    providing retrieved evidence makes the task a realistic RAG + generation
-    experiment instead of asking the adapter to hallucinate held-out facts.
-    """
-
-    brief = {
-        "industry": case.industry,
-        "use_case": case.use_case,
-        "data_types": case.data_types,
-        "deployment": case.deployment,
-        "concurrency": case.concurrency,
-        "latency_requirement": case.latency_requirement,
-        "compliance": case.compliance,
-        "budget": case.budget,
-    }
-    retrieved = []
-    for item in evidence[:3]:
-        serialized = asdict(item)
-        if isinstance(serialized.get("excerpt"), str):
-            serialized["excerpt"] = serialized["excerpt"][:180]
-        retrieved.append(serialized)
+def _format_model_input(replay: Any) -> str:
+    response = replay.states.final.get("response") or {}
     context = {
-        "case_id": case.case_id,
-        "customer_brief": brief,
-        "raw_request": case.raw_request,
-        "retrieved_evidence": retrieved,
-        "evidence_policy": "只能引用 retrieved_evidence；没有证据时不得编造产品事实。",
+        "case_id": replay.case_id,
+        "customer_input": replay.initial_input.model_dump(mode="json") if replay.initial_input else {},
+        "retrieved_evidence": [item for item in response.get("evidence", [])[:4]],
+        "requirements": response.get("requirements", []),
+        "evidence_policy": "只能引用 retrieved_evidence；没有证据不得编造事实或承诺。",
     }
     return json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

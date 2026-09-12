@@ -41,7 +41,7 @@ docker compose -p ai-presales-dify \
 - 打开检索测试，检查是否能召回部署、安全和推理资料
 - 为无召回结果设置固定回复：资料不足，请补充客户约束或产品资料
 - 不在系统提示词中写死价格、SLA、认证或准确率
-- 开启结构化输出能力时，正式 v2 契约使用 `output_schema_v2.json`；`draft_schema_v2.json` 是 llama-server 模型输出契约。旧的 `output_schema.json` 和 `workflow_contract.json` 只用于 v1 兼容样例。契约由 `scripts/export_schemas.py` 从 Pydantic 生成，禁止手工漂移。
+- 开启结构化输出能力时，正式 v2 契约使用 `output_schema_v2.json`；`draft_schema_v2.json` 是 llama-server 模型输出契约。两者都是派生产物，由 `scripts/export_schemas.py` 生成，并通过 `make schema-check` 检查漂移，禁止手工修改。
 
 ## 工作流节点
 
@@ -79,6 +79,6 @@ PRESALES_ALLOW_DEV_AUTH=true uv run python scripts/serve_agent.py --allow-dev-au
 curl http://127.0.0.1:8090/healthz
 ```
 
-它使用 LangGraph + SQLite/PostgreSQL checkpoint，提供 `/v1/projects/{project_id}/runs`、`/v1/runs/{run_id}/events`、`/v1/runs/{run_id}/reviews` 等接口。旧 v1 HTTP 服务需显式 `--mode legacy`。
+它使用 LangGraph + SQLite/PostgreSQL checkpoint，提供当前 `/v2/projects/{project_id}/runs`、`/v2/runs/{run_id}/events`、`/v2/runs/{run_id}/reviews` 等接口。项目不提供自有 `/v1` HTTP 兼容层；Dify 的 `/v1/chat-messages` 只属于外部 Dify API 边界。
 
 Dify App API 的密钥只能由 `DifyClient` 在服务端调用，不能放进 Gradio 前端代码或浏览器请求中。

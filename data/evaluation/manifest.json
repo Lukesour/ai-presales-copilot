@@ -1,0 +1,42 @@
+{
+  "dataset_id": "requirements-first-replay-cases",
+  "schema_version": "v2",
+  "metadata": {
+    "synthetic": true,
+    "source_version": "demo-catalog-1.0/replay-1.0",
+    "license": "internal-synthetic",
+    "sensitivity": "non-sensitive",
+    "purpose": "offline-evaluation",
+    "created_at": "2026-09-11"
+  },
+  "source": {
+    "scenario_catalog": {
+      "path": "data/demo/scenarios.json",
+      "sha256": "57d362d3b386690b2af37009a506c95dd71de5365bc5665ea92dead7efe35e68"
+    },
+    "replays": {
+      "normal": {
+        "path": "data/demo/replays/normal.json",
+        "sha256": "7452df349d075c2871df996d600da974d3388f7b801da72863f8f0be37b9364b"
+      },
+      "high_risk": {
+        "path": "data/demo/replays/high_risk.json",
+        "sha256": "fd67735eef185610ac96b2c595e43fb6049e9c55890f3266c785d5f7cad7ce69"
+      },
+      "missing_then_clarified": {
+        "path": "data/demo/replays/missing_then_clarified.json",
+        "sha256": "b5ca3ecf0ac4f7fbfd85e7f3ae13de28c53d9ccba46f2fa2a099e13f1cbbec19"
+      },
+      "conflict_or_injection": {
+        "path": "data/demo/replays/conflict_or_injection.json",
+        "sha256": "5c1a95b03bcd471e5eb8a942e2b8d6f07c20757563c851a441062456dc9be508"
+      }
+    }
+  },
+  "files": {
+    "cases": {
+      "path": "data/evaluation/replay_cases.jsonl",
+      "sha256": "8846601bddec98b5b9aba0964c5a44867e309538d5aeac3cdbca058625a7c608"
+    }
+  }
+}

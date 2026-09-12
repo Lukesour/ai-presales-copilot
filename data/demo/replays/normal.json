@@ -13,18 +13,61 @@
     "prompt_version": "v2-local-model-presales-graph-2026-09-09",
     "knowledge_snapshot_id": "repository-knowledge-v1"
   },
+  "initial_input": {
+    "raw_request": "制造业客户希望减少设备停机损失。维修工程师使用维修手册和历史工单知识助手，部署在公有云 API，数据驻留中国境内且允许出域，峰值并发 5、完整答案 10 秒内，验收要求关键问题必须可引用来源。",
+    "source": "meeting_notes",
+    "locale": "zh-CN",
+    "received_at": "2026-09-11T00:00:00Z"
+  },
+  "input_turns": [
+    {"turn_id": "turn-1", "role": "customer", "content": "制造业客户希望减少设备停机损失。维修工程师使用维修手册和历史工单知识助手，部署在公有云 API，数据驻留中国境内且允许出域，峰值并发 5、完整答案 10 秒内，验收要求关键问题必须可引用来源。", "source": "initial", "created_at": "2026-09-11T00:00:00Z"}
+  ],
   "events": [
-    {"seq": 1, "event_type": "node_finished", "node": "intake", "status": "running", "state_version": 2, "created_at": "2026-09-11T00:00:01Z", "node_latency_ms": 3.2},
-    {"seq": 2, "event_type": "node_finished", "node": "clarify", "status": "running", "state_version": 3, "created_at": "2026-09-11T00:00:02Z", "node_latency_ms": 1.1},
-    {"seq": 3, "event_type": "node_finished", "node": "query_rewrite", "status": "running", "state_version": 4, "created_at": "2026-09-11T00:00:03Z", "node_latency_ms": 280.4},
-    {"seq": 4, "event_type": "node_finished", "node": "retrieve", "status": "running", "state_version": 5, "created_at": "2026-09-11T00:00:04Z", "node_latency_ms": 4.7},
-    {"seq": 5, "event_type": "node_finished", "node": "draft", "status": "running", "state_version": 6, "created_at": "2026-09-11T00:00:05Z", "node_latency_ms": 1420.8},
-    {"seq": 6, "event_type": "node_finished", "node": "ground_claims", "status": "running", "state_version": 7, "created_at": "2026-09-11T00:00:06Z", "node_latency_ms": 4.2},
-    {"seq": 7, "event_type": "node_finished", "node": "critic", "status": "running", "state_version": 8, "created_at": "2026-09-11T00:00:07Z", "node_latency_ms": 320.5},
-    {"seq": 8, "event_type": "node_finished", "node": "risk_gate", "status": "running", "state_version": 9, "created_at": "2026-09-11T00:00:08Z", "node_latency_ms": 2.0},
-    {"seq": 9, "event_type": "node_finished", "node": "finalize", "status": "complete", "state_version": 10, "created_at": "2026-09-11T00:00:09Z", "node_latency_ms": 1.0}
+    {"seq": 1, "event_type": "run_created", "node": "intake", "status": "running", "state_version": 1, "created_at": "2026-09-11T00:00:00Z"},
+    {"seq": 2, "event_type": "node_finished", "node": "extract_requirements", "status": "running", "state_version": 3, "created_at": "2026-09-11T00:00:01Z", "node_latency_ms": 210.0},
+    {"seq": 3, "event_type": "node_finished", "node": "assess_requirements", "status": "ready_for_confirmation", "state_version": 4, "created_at": "2026-09-11T00:00:02Z", "node_latency_ms": 1.1},
+    {"seq": 4, "event_type": "requirements_confirmation_requested", "node": "requirements_confirmation", "status": "ready_for_confirmation", "state_version": 5, "created_at": "2026-09-11T00:00:02Z"},
+    {"seq": 5, "event_type": "requirements_confirmed", "node": "requirements_confirmation", "status": "queued", "state_version": 6, "created_at": "2026-09-11T00:00:03Z"},
+    {"seq": 6, "event_type": "node_finished", "node": "query_rewrite", "status": "running", "state_version": 7, "created_at": "2026-09-11T00:00:04Z", "node_latency_ms": 280.4},
+    {"seq": 7, "event_type": "node_finished", "node": "retrieve", "status": "running", "state_version": 8, "created_at": "2026-09-11T00:00:05Z", "node_latency_ms": 4.7},
+    {"seq": 8, "event_type": "node_finished", "node": "draft", "status": "running", "state_version": 9, "created_at": "2026-09-11T00:00:06Z", "node_latency_ms": 1420.8},
+    {"seq": 9, "event_type": "node_finished", "node": "ground_claims", "status": "running", "state_version": 10, "created_at": "2026-09-11T00:00:07Z", "node_latency_ms": 4.2},
+    {"seq": 10, "event_type": "node_finished", "node": "critic", "status": "running", "state_version": 11, "created_at": "2026-09-11T00:00:08Z", "node_latency_ms": 320.5},
+    {"seq": 11, "event_type": "node_finished", "node": "risk_gate", "status": "running", "state_version": 12, "created_at": "2026-09-11T00:00:09Z", "node_latency_ms": 2.0},
+    {"seq": 12, "event_type": "run_finished", "node": "finalize", "status": "complete", "state_version": 13, "created_at": "2026-09-11T00:00:10Z", "node_latency_ms": 1.0}
   ],
   "states": {
+    "initial": {
+      "schema_version": "2.0",
+      "run_id": "replay-normal-run",
+      "trace_id": "replay-normal-trace",
+      "thread_id": "replay:normal",
+      "tenant_id": "demo",
+      "project_id": "demo",
+      "phase": "requirements",
+      "status": "ready_for_confirmation",
+      "current_node": "requirements_confirmation",
+      "state_version": 5,
+      "input": {"raw_request": "制造业客户希望减少设备停机损失。维修工程师使用维修手册和历史工单知识助手，部署在公有云 API，数据驻留中国境内且允许出域，峰值并发 5、完整答案 10 秒内，验收要求关键问题必须可引用来源。", "source": "meeting_notes", "locale": "zh-CN"},
+      "brief": {"schema_version": "2.0", "case_id": "demo-normal-001", "industry": "制造业", "business_goal": "减少设备停机损失", "use_case": "设备维修知识问答", "target_users": ["维修工程师"], "data_types": ["维修手册 PDF", "历史工单"], "deployment": "公有云 API", "capacity": {"peak_concurrency": 5, "full_answer_target_ms": 10000}, "governance": {"residency": "中国境内", "egress_allowed": true}, "budget": "POC 预算待确认", "timeline": null, "integrations": ["企业文档库", "统一身份认证"], "acceptance_criteria": ["关键问题可引用来源", "完成答案延迟不超过 10 秒"], "raw_request": "制造业客户希望减少设备停机损失。维修工程师使用维修手册和历史工单知识助手，部署在公有云 API，数据驻留中国境内且允许出域，峰值并发 5、完整答案 10 秒内，验收要求关键问题必须可引用来源。"},
+      "requirement_facts": [
+        {"field_path": "business_goal", "display_name": "业务目标", "value_text": "减少设备停机损失", "status": "stated", "importance": "blocking", "confidence": 0.96, "source_turn_id": "turn-1", "source_quote": "减少设备停机损失"},
+        {"field_path": "use_case", "display_name": "业务场景", "value_text": "设备维修知识助手", "status": "stated", "importance": "blocking", "confidence": 0.94, "source_turn_id": "turn-1", "source_quote": "知识助手"},
+        {"field_path": "target_users", "display_name": "目标用户/业务流程", "value_text": "维修工程师", "status": "stated", "importance": "blocking", "confidence": 0.98, "source_turn_id": "turn-1", "source_quote": "维修工程师"},
+        {"field_path": "data_types", "display_name": "数据来源", "value_text": "维修手册、历史工单", "status": "stated", "importance": "blocking", "confidence": 0.95, "source_turn_id": "turn-1", "source_quote": "维修手册和历史工单"},
+        {"field_path": "deployment", "display_name": "部署方式", "value_text": "公有云 API", "status": "stated", "importance": "blocking", "confidence": 0.98, "source_turn_id": "turn-1", "source_quote": "公有云 API"},
+        {"field_path": "governance.residency", "display_name": "数据驻留/出域", "value_text": "中国境内；允许出域", "status": "stated", "importance": "blocking", "confidence": 0.95, "source_turn_id": "turn-1", "source_quote": "数据驻留中国境内且允许出域"},
+        {"field_path": "acceptance_criteria", "display_name": "验收标准", "value_text": "关键问题必须可引用来源", "status": "stated", "importance": "blocking", "confidence": 0.96, "source_turn_id": "turn-1", "source_quote": "关键问题必须可引用来源"},
+        {"field_path": "capacity.peak_concurrency", "display_name": "峰值并发", "value_text": "5", "status": "stated", "importance": "warning", "confidence": 0.94, "source_turn_id": "turn-1", "source_quote": "峰值并发 5"},
+        {"field_path": "capacity.latency_target", "display_name": "时延目标", "value_text": "10000 ms", "status": "stated", "importance": "warning", "confidence": 0.93, "source_turn_id": "turn-1", "source_quote": "完整答案 10 秒内"}
+      ],
+      "requirement_analysis": {"ready_for_confirmation": true, "blocking_fields": [], "warning_fields": [], "conflicts": [], "questions": [], "clarification_turns": 0, "max_clarification_turns": 3},
+      "requirements_confirmed": false,
+      "response": null,
+      "error_code": "requirements_not_confirmed",
+      "errors": [], "feedback": [], "created_at": "2026-09-11T00:00:00Z"
+    },
+    "confirmed": {"schema_version": "2.0", "run_id": "replay-normal-run", "trace_id": "replay-normal-trace", "thread_id": "replay:normal", "tenant_id": "demo", "project_id": "demo", "phase": "solution", "status": "running", "current_node": "retrieve", "state_version": 8, "requirements_confirmed": true, "response": null, "created_at": "2026-09-11T00:00:05Z"},
     "final": {
       "schema_version": "2.0",
       "run_id": "replay-normal-run",

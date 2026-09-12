@@ -1,0 +1,179 @@
+{
+  "schemas": {
+    "CustomerInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_request"],
+      "properties": {
+        "raw_request": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "source": {
+          "type": "string",
+          "enum": ["meeting_notes", "email", "chat", "form", "other"],
+          "default": "chat"
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32,
+          "default": "zh-CN"
+        },
+        "received_at": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "RunInputRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input"],
+      "properties": {
+        "input": {
+          "$ref": "../components/requirements.json#/schemas/CustomerInput"
+        },
+        "source": {
+          "type": ["string", "null"],
+          "enum": ["meeting_notes", "email", "chat", "form", "other", null]
+        }
+      }
+    },
+    "RequirementOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_path", "value_text"],
+      "properties": {
+        "field_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "value_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    },
+    "ClarificationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "overrides": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "../components/requirements.json#/schemas/RequirementOverride"
+          }
+        },
+        "expected_state_version": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "state_version": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "RequirementConfirmRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "const": "confirm",
+          "default": "confirm"
+        },
+        "acknowledged_warnings": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "expected_state_version": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "state_version": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "RequirementFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_path", "display_name", "status", "importance"],
+      "properties": {
+        "field_path": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "value_text": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["stated", "confirmed", "inferred", "missing", "ambiguous", "conflicting"]
+        },
+        "importance": {
+          "type": "string",
+          "enum": ["blocking", "warning"]
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "source_turn_id": {
+          "type": ["string", "null"]
+        },
+        "source_quote": {
+          "type": ["string", "null"]
+        },
+        "start_char": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "end_char": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "RequirementConflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_path", "description", "resolution_question"],
+      "properties": {
+        "field_path": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "source_turn_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resolution_question": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

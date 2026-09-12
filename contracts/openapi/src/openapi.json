@@ -1,0 +1,138 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AI Presales Copilot API",
+    "version": "2.0.0",
+    "description": "Requirements-first, evidence-aware presales workflow with explicit review gates."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "$ref": "paths/healthz.json"
+    },
+    "/readyz": {
+      "$ref": "paths/readyz.json"
+    },
+    "/v2/projects/{project_id}/runs": {
+      "$ref": "paths/create_run.json"
+    },
+    "/v2/runs/{run_id}": {
+      "$ref": "paths/get_run.json"
+    },
+    "/v2/runs/{run_id}/events": {
+      "$ref": "paths/get_events.json"
+    },
+    "/v2/runs/{run_id}/clarifications": {
+      "$ref": "paths/add_clarification.json"
+    },
+    "/v2/runs/{run_id}/requirements/confirm": {
+      "$ref": "paths/confirm_requirements.json"
+    },
+    "/v2/runs/{run_id}/reviews": {
+      "$ref": "paths/review_run.json"
+    },
+    "/v2/runs/{run_id}/feedback": {
+      "$ref": "paths/record_feedback.json"
+    },
+    "/v2/chat/completions": {
+      "$ref": "paths/chat_completions.json"
+    }
+  },
+  "components": {
+    "schemas": {
+      "Problem": {
+        "$ref": "components/http-boundary.json#/schemas/Problem"
+      },
+      "HealthResponse": {
+        "$ref": "components/http-boundary.json#/schemas/HealthResponse"
+      },
+      "ReadinessResponse": {
+        "$ref": "components/http-boundary.json#/schemas/ReadinessResponse"
+      },
+      "CustomerInput": {
+        "$ref": "components/requirements.json#/schemas/CustomerInput"
+      },
+      "RunInputRequest": {
+        "$ref": "components/requirements.json#/schemas/RunInputRequest"
+      },
+      "ClarificationRequest": {
+        "$ref": "components/requirements.json#/schemas/ClarificationRequest"
+      },
+      "RequirementConfirmRequest": {
+        "$ref": "components/requirements.json#/schemas/RequirementConfirmRequest"
+      },
+      "RequirementOverride": {
+        "$ref": "components/requirements.json#/schemas/RequirementOverride"
+      },
+      "RequirementFact": {
+        "$ref": "components/requirements.json#/schemas/RequirementFact"
+      },
+      "RequirementConflict": {
+        "$ref": "components/requirements.json#/schemas/RequirementConflict"
+      },
+      "RunState": {
+        "$ref": "components/runs.json#/schemas/RunState"
+      },
+      "EventList": {
+        "$ref": "components/runs.json#/schemas/EventList"
+      },
+      "ReviewRequest": {
+        "$ref": "components/reviews.json#/schemas/ReviewRequest"
+      },
+      "FeedbackRequest": {
+        "$ref": "components/reviews.json#/schemas/FeedbackRequest"
+      },
+      "ChatCompletionRequest": {
+        "$ref": "components/chat.json#/schemas/ChatCompletionRequest"
+      },
+      "ChatMessage": {
+        "$ref": "components/chat.json#/schemas/ChatMessage"
+      },
+      "ChatCompletionResponse": {
+        "$ref": "components/chat.json#/schemas/ChatCompletionResponse"
+      }
+    },
+    "parameters": {
+      "ProjectId": {
+        "$ref": "components/http-boundary.json#/parameters/ProjectId"
+      },
+      "RunId": {
+        "$ref": "components/http-boundary.json#/parameters/RunId"
+      },
+      "IdempotencyKey": {
+        "$ref": "components/http-boundary.json#/parameters/IdempotencyKey"
+      },
+      "ProjectHeader": {
+        "$ref": "components/http-boundary.json#/parameters/ProjectHeader"
+      },
+      "TenantHeader": {
+        "$ref": "components/http-boundary.json#/parameters/TenantHeader"
+      },
+      "UserHeader": {
+        "$ref": "components/http-boundary.json#/parameters/UserHeader"
+      },
+      "RolesHeader": {
+        "$ref": "components/http-boundary.json#/parameters/RolesHeader"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "$ref": "components/http-boundary.json#/securitySchemes/bearerAuth"
+      }
+    },
+    "responses": {
+      "Problem": {
+        "$ref": "components/http-boundary.json#/responses/Problem"
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Phase 1 API
 
-默认入口是 `scripts/serve_agent.py` 的 FastAPI v2 服务。旧的规则 Agent 和 `http.server` 只作为离线回归 fixture，不提供正式服务入口。
+默认入口是 `scripts/serve_agent.py` 的 FastAPI v2 服务。项目公共 HTTP 契约由 `contracts/openapi/src/` 维护，`contracts/openapi/dist/` 是生成 bundle。
 
 ## 启动
 
@@ -11,33 +11,61 @@ PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
 
 `/healthz` 是进程存活检查；`/readyz` 同时检查 checkpoint 数据库、知识索引和 llama-server。`/readyz` 返回 200 `{"status":"ready"}` 或 503 `{"status":"not_ready","checks":{...}}`，前者才允许演示页面创建 Live run。业务接口需要 `Authorization: Bearer <token>`。开发 token 还支持 `X-Tenant-ID`、`X-User-ID`、`X-Roles`，共享部署必须替换成 OIDC/JWT 校验器。
 
-## 资源
+## 资源：需求优先 v2
+
+正式入口只有 `/v2`；项目不注册自有 `/v1` 路由。Dify `/v1/chat-messages` 和 llama-server `/v1/chat/completions` 是外部服务协议，由各自 adapter 调用。
 
 | 方法 | 路径 | 最低角色 | 说明 |
 |---|---|---|---|
-| POST | `/v1/projects/{project_id}/runs` | presales | 创建或按 `Idempotency-Key` 重放 run |
-| GET | `/v1/runs/{run_id}` | viewer | 读取脱敏后的状态/响应 |
-| GET | `/v1/runs/{run_id}/events` | viewer | 读取节点和审核事件 |
-| POST | `/v1/runs/{run_id}/reviews` | reviewer | approve/reject；乐观锁 + 幂等 |
-| POST | `/v1/runs/{run_id}/feedback` | presales | 保存评分/标签/反馈 |
-| POST | `/v1/chat/completions` | presales | 返回真实 `run_id` 的兼容 facade |
+| POST | `/v2/projects/{project_id}/runs` | presales | 只接收 `input.raw_request`，创建需求分析 run |
+| POST | `/v2/runs/{run_id}/clarifications` | presales | 追加最多 3 个澄清回合，重新抽取和评估 |
+| POST | `/v2/runs/{run_id}/requirements/confirm` | presales | 确认关键需求和警告假设后进入方案图 |
+| GET | `/v2/runs/{run_id}` | viewer | 读取原始输入、brief、字段事实、完整性分析和响应 |
+| GET | `/v2/runs/{run_id}/events` | viewer | 读取需求门、方案节点和审核事件 |
+| POST | `/v2/runs/{run_id}/reviews` | reviewer | approve/reject；乐观锁 + 幂等 |
+| POST | `/v2/runs/{run_id}/feedback` | presales | 保存评分/标签/反馈 |
+| POST | `/v2/chat/completions` | presales | 进入同一需求优先状态机的兼容 facade |
 
-`GET /v1/runs/{run_id}`、创建 run 和审核响应都包含确定性的 `clarify` 投影：
+所有写请求需要 `Idempotency-Key`；澄清、确认、审核和反馈还必须携带响应中的 `state_version`（澄清/确认也接受别名 `expected_state_version`）。版本过期返回 `409`，同一幂等键返回之前的投影。澄清单回合最多 4 个问题，run 最多 3 个澄清回合。
+
+初始请求示例：
 
 ```json
 {
-  "clarify": {
-    "missing_fields": ["deployment", "capacity.peak_concurrency"],
-    "questions": ["请确认公有云、私有化、内网还是边缘部署。"]
-  }
+  "input": {
+    "raw_request": "客户希望把维修手册和历史工单做成设备运维知识助手，回答必须可引用。",
+    "source": "meeting_notes",
+    "locale": "zh-CN"
+  },
+  "source": "meeting_notes"
 }
 ```
 
-该投影只公开缺失字段和澄清问题，不暴露内部 prompt、policy 匹配或完整 Agent 状态。
+需求阶段公开状态示例：
 
-所有写请求需要 `Idempotency-Key`；服务会返回 `X-Request-ID`。错误使用统一对象：`type`、`title`、`status`、`detail`、`request_id`、可选 `errors`。
+```json
+{
+  "status": "needs_clarification",
+  "phase": "requirements",
+  "brief": {"business_goal": null, "deployment": null},
+  "requirement_analysis": {
+    "blocking_fields": ["business_goal", "deployment", "acceptance_criteria"],
+    "warning_fields": ["capacity.peak_concurrency"],
+    "questions": []
+  },
+  "response": null
+}
+```
 
-## v2 brief
+`RequirementFactV2` 的 `status` 区分 `stated`、`confirmed`、`inferred`、`missing`、`ambiguous`、`conflicting`；`stated/confirmed` 必须带 `source_turn_id` 和服务端验证过的 `source_quote`。完整性目录由代码计算，模型不能自行把推断值升级为客户事实。
+
+需求状态还会返回 `extraction_mode`：正常为 `model`；本地模型或 schema 失败后若能从原文安全匹配则为 `deterministic_fallback`。后者只生成带原文片段的保守需求事实，仍停在 `needs_clarification` 或 `ready_for_confirmation`，不会检索或生成方案。方案节点的结构化输出失败仍进入 `model_unavailable`，不会用固定模板补齐。
+
+## 项目边界
+
+所有写请求需要 `Idempotency-Key`；服务会返回 `X-Request-ID`。错误使用统一对象：`type`、`title`、`status`、`detail`、`request_id`、可选 `errors`。旧项目模型、旧 fixture 和旧 HTTP 路由不提供转换或回退读取。
+
+## 方案输出 brief（确认后内部契约）
 
 ```json
 {
@@ -67,7 +95,7 @@ PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
 
 ## OpenAI-compatible facade
 
-`POST /v1/chat/completions` 不绕过鉴权、检索或审核。`choices[0].message.content` 是 v2 JSON 字符串，顶层 `run_id` 可用于查询事件和提交审核。
+`POST /v2/chat/completions` 不绕过鉴权、检索或审核。`choices[0].message.content` 是 v2 JSON 字符串，顶层 `run_id` 可用于查询事件和提交审核。
 
 ## 求职演示 Replay
 

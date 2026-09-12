@@ -14,13 +14,29 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
-from .schemas import CustomerBriefV2, SolutionResponseV2, StrictModel
+from .requirements import validate_fact_sources
+from .schemas import (
+    CustomerBriefV2,
+    CustomerInputV2,
+    InputTurnV2,
+    RequirementFactV2,
+    SolutionResponseV2,
+    StrictModel,
+)
 from .security import inspect_sensitive_data
 
-DEMO_SCENARIO_IDS = ("normal", "missing", "high_risk")
+DEMO_SCENARIO_IDS = (
+    "normal",
+    "high_risk",
+    "missing_then_clarified",
+    "conflict_or_injection",
+)
 DEMO_WORKFLOW_NODES = (
     "intake",
+    "extract_requirements",
+    "assess_requirements",
     "clarify",
+    "requirements_confirmation",
     "query_rewrite",
     "retrieve",
     "draft",
@@ -55,7 +71,7 @@ class DemoExpectedPath(StrictModel):
 class DemoScenario(StrictModel):
     """A complete v2 brief owned by the demo catalog."""
 
-    scenario_id: Literal["normal", "missing", "high_risk"]
+    scenario_id: Literal["normal", "missing_then_clarified", "high_risk", "conflict_or_injection"]
     label: str = Field(min_length=1, max_length=128)
     description: str = Field(min_length=1, max_length=2_000)
     brief: CustomerBriefV2
@@ -74,7 +90,9 @@ class DemoScenarioCatalog(StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("demo scenario IDs must be unique")
         if set(ids) != set(DEMO_SCENARIO_IDS):
-            raise ValueError("demo catalog must contain normal, missing, and high_risk")
+            raise ValueError(
+                "demo catalog must contain normal, missing_then_clarified, high_risk, and conflict_or_injection"
+            )
         return self
 
 
@@ -102,8 +120,11 @@ class ReplayEvent(StrictModel):
 
 
 class ReplayStates(StrictModel):
-    """Public states before and after a possible human-review transition."""
+    """Public states for the complete input-to-delivery journey."""
 
+    initial: dict[str, Any] | None = None
+    clarified: dict[str, Any] | None = None
+    confirmed: dict[str, Any] | None = None
     pending: dict[str, Any] | None = None
     final: dict[str, Any]
 
@@ -112,13 +133,15 @@ class ReplaySnapshot(StrictModel):
     """Validated, static state and event snapshot for one demo scenario."""
 
     replay_schema_version: Literal["1.0"] = "1.0"
-    scenario_id: Literal["normal", "missing", "high_risk"]
+    scenario_id: Literal["normal", "missing_then_clarified", "high_risk", "conflict_or_injection"]
     label: str = Field(min_length=1, max_length=128)
     case_id: str = Field(min_length=1, max_length=128)
     synthetic: Literal[True] = True
     captured_from: Literal["live_api"] = "live_api"
     captured_at: str = Field(min_length=1, max_length=128)
     provenance: ReplayProvenance
+    initial_input: CustomerInputV2 | None = None
+    input_turns: list[InputTurnV2] = Field(default_factory=list, max_length=8)
     events: list[ReplayEvent] = Field(min_length=1, max_length=512)
     states: ReplayStates
 
@@ -132,13 +155,57 @@ class ReplaySnapshot(StrictModel):
                 raise ValueError("high_risk replay requires a pending state")
             if self.states.pending.get("status") != "waiting_for_review":
                 raise ValueError("high_risk pending state must wait for review")
-        if self.states.final.get("status") != "complete":
+        if self.states.initial is not None:
+            if self.states.initial.get("status") not in {
+                "needs_clarification",
+                "ready_for_confirmation",
+                "rejected",
+                "needs_review",
+            }:
+                raise ValueError("replay initial state must stop in requirements or policy gate")
+            if self.states.initial.get("response") is not None:
+                raise ValueError("replay initial state cannot contain a solution response")
+        if self.states.clarified is not None:
+            if self.states.clarified.get("status") != "ready_for_confirmation":
+                raise ValueError("replay clarified state must wait for requirements confirmation")
+            if self.states.clarified.get("response") is not None:
+                raise ValueError("replay clarified state cannot contain a solution response")
+        if self.states.confirmed is not None and not self.states.confirmed.get("requirements_confirmed"):
+            raise ValueError("replay confirmed state must record requirements_confirmed")
+        if self.initial_input is not None and not self.input_turns:
+            raise ValueError("replay initial_input requires at least one input turn")
+        for state_name, state in (
+            ("initial", self.states.initial),
+            ("clarified", self.states.clarified),
+            ("confirmed", self.states.confirmed),
+            ("pending", self.states.pending),
+            ("final", self.states.final),
+        ):
+            if state is None or not state.get("requirement_facts"):
+                continue
+            try:
+                facts = [RequirementFactV2.model_validate(item) for item in state["requirement_facts"]]
+                validate_fact_sources(facts, self.input_turns)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"replay {state_name} contains invalid requirement attribution") from exc
+        allowed_final_statuses = {"complete"}
+        if self.scenario_id == "conflict_or_injection":
+            allowed_final_statuses.add("rejected")
+        if self.states.final.get("status") not in allowed_final_statuses:
             raise ValueError("replay final state must be complete")
-        for state_name, state in (("pending", self.states.pending), ("final", self.states.final)):
+        for state_name, state in (
+            ("initial", self.states.initial),
+            ("clarified", self.states.clarified),
+            ("confirmed", self.states.confirmed),
+            ("pending", self.states.pending),
+            ("final", self.states.final),
+        ):
             if state is None:
                 continue
             response = state.get("response")
             if response is None:
+                if state_name in {"initial", "clarified", "confirmed"}:
+                    continue
                 raise ValueError(f"replay {state_name} state must contain a response")
             parsed = SolutionResponseV2.model_validate(response)
             if parsed.case_id != self.case_id:
@@ -192,11 +259,14 @@ def normalize_live_events(raw_events: list[dict[str, Any]]) -> list[dict[str, An
     normalized: list[dict[str, Any]] = []
     for seq, raw in enumerate(raw_events, start=1):
         node = raw.get("node")
+        failed_node = raw.get("failed_node")
+        if node not in DEMO_WORKFLOW_NODES:
+            node = failed_node
         if node not in DEMO_WORKFLOW_NODES:
             node = "human_review" if raw.get("event_type", "").startswith("review_") else None
         details = {
             key: ("demo-reviewer" if key == "reviewer_id" else raw[key])
-            for key in ("decision", "reviewer_id", "error_code", "message")
+            for key in ("decision", "reviewer_id", "error_code", "message", "failed_node")
             if key in raw and isinstance(raw[key], (str, int, float, bool))
         }
         latency = raw.get("node_latency_ms")
@@ -219,9 +289,15 @@ def normalize_live_events(raw_events: list[dict[str, Any]]) -> list[dict[str, An
     return normalized
 
 
-def active_replay_state(snapshot: ReplaySnapshot, *, approved: bool = False) -> dict[str, Any]:
-    """Return the immutable final state or the review-pending state."""
+def active_replay_state(
+    snapshot: ReplaySnapshot, *, approved: bool = False, stage: str | None = None
+) -> dict[str, Any]:
+    """Return one immutable stage, defaulting to the current review outcome."""
 
+    if stage in {"initial", "clarified", "confirmed"}:
+        candidate = getattr(snapshot.states, stage)
+        if candidate is not None:
+            return candidate
     if approved or snapshot.states.pending is None:
         return snapshot.states.final
     return snapshot.states.pending

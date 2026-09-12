@@ -1,0 +1,29 @@
+{
+  "get": {
+    "operationId": "getReadiness",
+    "summary": "Report database, knowledge and model readiness.",
+    "security": [],
+    "responses": {
+      "200": {
+        "description": "All required dependencies are ready.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../components/http-boundary.json#/schemas/ReadinessResponse"
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "One or more dependencies are not ready.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../components/http-boundary.json#/schemas/ReadinessResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

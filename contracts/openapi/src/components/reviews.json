@@ -1,0 +1,44 @@
+{
+  "schemas": {
+    "ReviewRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "state_version"],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": ["approve", "reject"]
+        },
+        "reason": {
+          "type": ["string", "null"]
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "FeedbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state_version"],
+      "properties": {
+        "rating": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 5
+        },
+        "label": {
+          "type": ["string", "null"]
+        },
+        "comment": {
+          "type": ["string", "null"]
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

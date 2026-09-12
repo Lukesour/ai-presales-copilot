@@ -1,6 +1,6 @@
 """A small model-facing contract for the presales Agent.
 
-The public ``SolutionResponse`` is intentionally rich: it contains the full
+The public ``SolutionResponseV2`` is intentionally rich: it contains the full
 POC plan, model strategy, evidence objects and runtime-facing review fields.
 That is a good application contract, but it is too large for a 0.5B model to
 reliably regenerate from a few dozen examples.  This module defines the
@@ -18,12 +18,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from .schemas import validate_solution_dict
+from .schemas import SolutionResponseV2
 
 COMPACT_REQUIRED_FIELDS = (
     "case_id",
     "executive_summary",
-    "recommendation",
+    "recommendations",
     "risk_flags",
     "clarifying_questions",
     "evidence_ids",
@@ -33,8 +33,8 @@ COMPACT_REQUIRED_FIELDS = (
 COMPACT_SYSTEM_PROMPT = (
     "你是企业 AI 解决方案售前顾问。只输出一个合法 JSON 对象，不要输出 Markdown、"
     "代码围栏或解释。JSON 必须且只能包含字段：case_id、executive_summary、"
-    "recommendation、risk_flags、clarifying_questions、evidence_ids、review_status。"
-    "recommendation、risk_flags、clarifying_questions、evidence_ids 必须是字符串数组。"
+    "recommendations、risk_flags、clarifying_questions、evidence_ids、review_status。"
+    "recommendations、risk_flags、clarifying_questions、evidence_ids 必须是字符串数组。"
     "review_status 只能是 not_required、pending、approved 或 rejected。"
     "只能使用客户输入和 retrieved_evidence；没有证据时保持保守，不编造价格、SLA、"
     "准确率、认证或容量。"
@@ -56,7 +56,7 @@ def validate_compact_solution_dict(payload: dict[str, Any]) -> None:
             raise ValueError(f"{field_name} must be a non-empty string")
 
     for field_name in (
-        "recommendation",
+        "recommendations",
         "risk_flags",
         "clarifying_questions",
         "evidence_ids",
@@ -91,7 +91,7 @@ def compact_target_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     target = {
         "case_id": payload.get("case_id", ""),
         "executive_summary": payload.get("executive_summary", ""),
-        "recommendation": list(payload.get("recommendation", []))[:4],
+        "recommendations": list(payload.get("recommendations", []))[:4],
         "risk_flags": risks[:4],
         "clarifying_questions": list(payload.get("clarifying_questions", []))[:4],
         "evidence_ids": [
@@ -99,7 +99,7 @@ def compact_target_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
             for item in payload.get("evidence", [])[:4]
             if isinstance(item, dict) and item.get("evidence_id")
         ],
-        "review_status": payload.get("review_status", "pending"),
+        "review_status": (payload.get("review") or {}).get("status", "pending"),
     }
     validate_compact_solution_dict(target)
     return target
@@ -124,7 +124,7 @@ def merge_compact_solution(
         )
 
     merged["executive_summary"] = compact_payload["executive_summary"]
-    merged["recommendation"] = list(compact_payload["recommendation"])
+    merged["recommendations"] = list(compact_payload["recommendations"])
     merged["clarifying_questions"] = list(compact_payload["clarifying_questions"])
 
     existing_risks = list(merged.get("risks", []))
@@ -169,12 +169,12 @@ def merge_compact_solution(
             for evidence_id in compact_payload["evidence_ids"]
         ]
 
-    base_status = merged.get("review_status", "pending")
+    base_status = (merged.get("review") or {}).get("status", "pending")
     compact_status = compact_payload["review_status"]
     if base_status == "pending" or compact_status == "pending":
-        merged["review_status"] = "pending"
+        merged.setdefault("review", {})["status"] = "pending"
     else:
-        merged["review_status"] = compact_status
+        merged.setdefault("review", {})["status"] = compact_status
 
-    validate_solution_dict(merged, require_all_fields=True)
+    SolutionResponseV2.model_validate(merged)
     return merged

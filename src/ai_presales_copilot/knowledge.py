@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .schemas import Evidence
+from .schemas import EvidenceChunkV2
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ class KnowledgeBase:
         roles: Iterable[str] | None = None,
         source_ids: set[str] | None = None,
         as_of: datetime | None = None,
-    ) -> list[Evidence]:
+    ) -> list[EvidenceChunkV2]:
         query_terms = _terms(query)
         if not query_terms:
             return []
@@ -129,7 +129,7 @@ class KnowledgeBase:
             if score >= min_score:
                 ranked.append((score, document))
         ranked.sort(key=lambda item: item[0], reverse=True)
-        results: list[Evidence] = []
+        results: list[EvidenceChunkV2] = []
         for score, document in ranked[:top_k]:
             excerpt = _excerpt(document.text, query_terms)
             try:
@@ -137,23 +137,23 @@ class KnowledgeBase:
             except ValueError:
                 source_path = str(document.path)
             results.append(
-                Evidence(
-                    document.evidence_id,
-                    document.title,
-                    excerpt,
-                    source_path,
-                    round(score, 4),
+                EvidenceChunkV2(
+                    evidence_id=document.evidence_id,
                     source_id=document.source_id or document.evidence_id,
                     source_url=document.source_url,
                     version=document.version,
                     license=document.license,
                     locator="document-level",
-                    content_hash=_document_hash(document),
                     fetched_at=document.fetched_at,
                     effective_from=document.effective_from,
                     effective_to=document.effective_to,
                     tenant_id=document.tenant_id,
                     acl=list(document.acl),
+                    title=document.title,
+                    excerpt=excerpt,
+                    source_path=source_path,
+                    relevance=round(score, 4),
+                    content_hash=_document_hash(document),
                 )
             )
         return results
@@ -166,7 +166,7 @@ class KnowledgeBase:
         tenant_id: str | None = None,
         roles: Iterable[str] | None = None,
         source_ids: set[str] | None = None,
-    ) -> list[Evidence]:
+    ) -> list[EvidenceChunkV2]:
         """Merge lexical candidates across rewritten queries.
 
         The local baseline keeps the unit-test path dependency-light.  The same
@@ -174,7 +174,7 @@ class KnowledgeBase:
         retriever, so replacing the scorer does not change the Agent contract.
         """
 
-        merged: dict[str, Evidence] = {}
+        merged: dict[str, EvidenceChunkV2] = {}
         for query in queries:
             for item in self.search(
                 query,

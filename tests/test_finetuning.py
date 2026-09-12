@@ -20,9 +20,9 @@ def test_generated_finetuning_splits_are_valid() -> None:
 
     manifest = json.loads((base / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["metadata"]["generator"] == "scripts/build_finetune_dataset.py"
-    assert manifest["metadata"]["system_prompt_version"] == "v2-json-contract-rag-context"
+    assert manifest["metadata"]["system_prompt_version"] == "v2-requirements-first-compact-rag-context"
     assert manifest["metadata"]["target_format"] == "compact_json"
-    assert manifest["metadata"]["split_policy"].startswith("deterministic case-level")
+    assert manifest["metadata"]["split_policy"].startswith("deterministic scenario-level")
     assert all(not Path(item["path"]).is_absolute() for item in manifest["files"].values())
 
     sample = train[0]

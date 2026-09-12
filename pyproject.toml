@@ -33,6 +33,7 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.14",
     "httpx>=0.28",
+    "openapi-spec-validator>=0.7,<1",
 ]
 agent = ["langgraph>=1.0,<2"]
 finetune = [

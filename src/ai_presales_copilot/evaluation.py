@@ -1,14 +1,14 @@
-"""Evaluation helpers for quality gates that do not call an LLM judge."""
+"""Offline quality gates for the current requirements-first replay corpus."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .schemas import CustomerBrief, SolutionResponse, validate_solution_dict
+from .demo_replay import ReplaySnapshot, load_demo_replay, load_demo_scenarios
+from .schemas import SolutionResponseV2
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,7 @@ class EvaluationSummary:
     total: int
     schema_pass: int
     evidence_present: int
-    requirement_coverage: float
+    requirement_gate_pass: int
     no_evidence_guard: int
     high_risk_review: int
     failures: list[dict[str, str]]
@@ -27,98 +27,92 @@ class EvaluationSummary:
             "schema_pass": self.schema_pass,
             "schema_pass_rate": round(self.schema_pass / self.total, 4) if self.total else 0.0,
             "evidence_present": self.evidence_present,
-            "evidence_present_rate": round(self.evidence_present / self.total, 4)
-            if self.total
-            else 0.0,
-            "requirement_coverage": round(self.requirement_coverage, 4),
+            "requirement_gate_pass": self.requirement_gate_pass,
             "no_evidence_guard": self.no_evidence_guard,
             "high_risk_review": self.high_risk_review,
             "failures": self.failures,
         }
 
 
-def load_cases(path: str | Path) -> list[CustomerBrief]:
-    cases: list[CustomerBrief] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            cases.append(CustomerBrief(**json.loads(line)))
-    return cases
+def load_replays(replay_dir: str | Path, scenario_path: str | Path) -> list[ReplaySnapshot]:
+    """Load only registered, validated v2 replay snapshots."""
+
+    scenarios = load_demo_scenarios(scenario_path)
+    return [
+        load_demo_replay(replay_dir, scenario_id, scenarios=scenarios)
+        for scenario_id in scenarios
+    ]
 
 
-def evaluate_cases(
-    cases: list[CustomerBrief],
-    analyze: Callable[[CustomerBrief], SolutionResponse],
-) -> tuple[EvaluationSummary, list[dict[str, Any]]]:
+def evaluate_replays(replays: list[ReplaySnapshot]) -> tuple[EvaluationSummary, list[dict[str, Any]]]:
     schema_pass = 0
     evidence_present = 0
-    coverage_scores: list[float] = []
+    requirement_gate_pass = 0
     no_evidence_guard = 0
     high_risk_review = 0
     failures: list[dict[str, str]] = []
     outputs: list[dict[str, Any]] = []
 
-    for case in cases:
-        response = analyze(case)
-        output = response.to_dict()
-        output["case_id"] = case.case_id
-        outputs.append(output)
+    for replay in replays:
+        final = replay.states.final
+        response = final.get("response")
         try:
-            validate_solution_dict(output)
+            parsed = SolutionResponseV2.model_validate(response)
             schema_pass += 1
-        except ValueError as exc:
-            failures.append({"case_id": case.case_id, "metric": "schema", "detail": str(exc)})
-
-        if response.evidence:
-            evidence_present += 1
-        requested_fields = [
-            case.industry,
-            case.use_case,
-            case.deployment,
-            case.concurrency,
-            case.latency_requirement,
-        ]
-        matched = sum(
-            any(value in requirement.value for requirement in response.requirements)
-            for value in requested_fields
-            if value != "未说明"
-        )
-        expected = sum(value != "未说明" for value in requested_fields)
-        coverage_scores.append(matched / expected if expected else 1.0)
-
-        if not response.evidence and any(
-            word in response.executive_summary for word in ("资料不足", "不确定", "证据")
-        ):
-            no_evidence_guard += 1
-        elif not response.evidence:
+        except (TypeError, ValueError) as exc:
+            failures.append({"case_id": replay.case_id, "metric": "schema", "detail": str(exc)})
+            parsed = None
+        if parsed is not None:
+            if parsed.evidence:
+                evidence_present += 1
+            if not parsed.evidence and parsed.clarifying_questions:
+                no_evidence_guard += 1
+            if replay.scenario_id == "high_risk" and parsed.review.status in {"approved", "pending"}:
+                high_risk_review += 1
+        initial = replay.states.initial
+        if initial is not None and initial.get("response") is None:
+            requirement_gate_pass += 1
+        elif replay.scenario_id not in {"normal", "high_risk"}:
             failures.append(
                 {
-                    "case_id": case.case_id,
-                    "metric": "no_evidence_guard",
-                    "detail": "missing conservative fallback",
+                    "case_id": replay.case_id,
+                    "metric": "requirements_gate",
+                    "detail": "initial state contains a solution response",
                 }
             )
-
-        high_risk = bool(case.compliance) or case.deployment in {"私有化", "内网", "本地"}
-        if not high_risk or response.review_status in {"pending", "approved", "rejected"}:
-            high_risk_review += 1
-        else:
+        if replay.scenario_id == "high_risk" and replay.states.pending is None:
             failures.append(
                 {
-                    "case_id": case.case_id,
+                    "case_id": replay.case_id,
                     "metric": "high_risk_review",
-                    "detail": "review gate not triggered",
+                    "detail": "high-risk replay has no pending review state",
                 }
             )
+        outputs.append(
+            {
+                "scenario_id": replay.scenario_id,
+                "case_id": replay.case_id,
+                "status": final.get("status"),
+                "response": response,
+            }
+        )
 
     summary = EvaluationSummary(
-        total=len(cases),
+        total=len(replays),
         schema_pass=schema_pass,
         evidence_present=evidence_present,
-        requirement_coverage=sum(coverage_scores) / len(coverage_scores)
-        if coverage_scores
-        else 0.0,
+        requirement_gate_pass=requirement_gate_pass,
         no_evidence_guard=no_evidence_guard,
         high_risk_review=high_risk_review,
         failures=failures,
     )
     return summary, outputs
+
+
+def write_evaluation_report(path: str | Path, summary: EvaluationSummary, outputs: list[dict[str, Any]]) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps({"mode": "v2-replay", "summary": summary.to_dict(), "outputs": outputs}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )

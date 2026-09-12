@@ -13,8 +13,10 @@
 ## Phase 1 data flow
 
 ```text
-CustomerBriefV2 + auth context
-    -> LangGraph intake / clarify / query_rewrite
+CustomerInputV2(raw_request) + auth context
+    -> intake / extract_requirements / assess_requirements
+    -> clarify OR requirements_confirmation
+    -> LangGraph query_rewrite / retrieve / draft
     -> ACL-filtered retrieval (PostgreSQL tsvector + optional pgvector; local lexical fallback)
     -> local llama-server JSON-Schema draft
     -> evidence grounding + critic + one repair
@@ -23,7 +25,9 @@ CustomerBriefV2 + auth context
     -> versioned SolutionResponseV2
 ```
 
-本地模型运行时的语义生成全部来自 llama-server；字符 n-gram 只作为可审计的 Compose 基线检索器和无模型测试 fixture。没有模型时只返回 `model_unavailable`，不会使用 OfflineSolutionEngine 生成 v2 方案。Dify 适配器仍可用于对照实验，但不绕过 v2 API 的安全硬门。
+本地模型运行时的语义生成全部来自 llama-server；字符 n-gram 只作为可审计的 Compose 基线检索器和无模型测试 fixture。需求抽取使用无 `$defs/$ref`、有界数组的 compact model schema，发送给 llama.cpp 时采用 `response_format=json_object` + 顶层 `json_schema` 的单一路径，避免同时发送两套 grammar 定义导致 sampler 初始化失败；响应仍由完整 Pydantic 契约二次校验。模型抽取失败时只能使用带审计事件的确定性原文匹配 fallback，并停在需求门；检索、草案或审核节点失败则返回 `model_unavailable`，不会使用固定模板伪造 v2 方案。Dify 适配器仍可用于对照实验，但不绕过 v2 API 的需求确认、安全硬门。
+
+需求优先是方案生成的硬门：`needs_clarification` 和 `ready_for_confirmation` 状态不执行产品知识检索；只有确认后的 `CustomerBriefV2` 才会进入方案图。字段事实、原文引用和冲突保留在同一 run 的 checkpoint 中，便于从澄清回合恢复而不重新创建 run。
 
 ## Risk boundaries
 
@@ -37,10 +41,10 @@ CustomerBriefV2 + auth context
 
 ## Compatibility strategy
 
-核心包保留旧 dataclass/HTTP fixture 以便历史评测复现；正式运行时通过锁定的 runtime extra 安装：
+核心包只保留当前 v2 数据模型和 HTTP 行为；历史结果作为不可被运行时读取的证据保存。正式运行时通过锁定的 runtime extra 安装：
 
 - `uv sync --locked --extra runtime` 安装 FastAPI、LangGraph、LangGraph PostgreSQL checkpointer、psycopg 和 Uvicorn。
 - SQLite 用于单机测试；Compose 使用项目 checkpoint 表、LangGraph 原生 PostgreSQL `PostgresSaver`、`tsvector` 和 pgvector schema。登记资料通过可选的 `presales-ingest` 一次性任务写入同一知识卷，API 在 SQL 层先做 tenant/ACL/revocation 过滤。
-- `mock`/旧 `agent` 路径只用于回归，不应被描述为本地大模型产出的方案。
+- 无模型时只允许需求抽取的保守 fallback；方案节点不使用固定模板代替模型输出。
 - Dify 复用 v2 evidence/claim 契约时，需要经过同样的服务端校验。
 - 有 CUDA：运行 QLoRA 和 llama.cpp/vLLM 真实实验；无 CUDA 时只报告 dry-run 和已运行的 CPU/Apple 结果。

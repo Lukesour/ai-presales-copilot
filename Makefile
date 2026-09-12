@@ -1,19 +1,36 @@
 PYTHON ?= python3
 PYTHONPATH := src
+SECURITY_OUTPUT ?= data/results/security-evaluation.json
+EVAL_OUTPUT ?= data/results/offline-evaluation.json
 
-.PHONY: test lint demo eval agent-eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check schema-export ingest self-qa lock-check compose-config demo-replay-check demo-capture
+.PHONY: governance openapi-build openapi-check file-length test lint demo eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check schema-export schema-check ingest self-qa lock-check compose-config demo-replay-check replay-manifest-check demo-capture
+
+governance:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/check_governance.py
+
+openapi-build:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/build_openapi.py
+
+openapi-check:
+	PYTHONPATH=$(PYTHONPATH) uv run --locked --extra runtime --extra dev python scripts/check_openapi.py
+
+file-length:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/check_file_length.py
 
 test:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest -q
+	PYTHONPATH=src:. uv run --locked --extra runtime --extra dev pytest -q
 
 lint:
-	$(PYTHON) -m ruff check src scripts tests demo/gradio_app.py
+	PYTHONPATH=src:. uv run --locked --extra runtime --extra dev ruff check src scripts tests migrations demo/gradio_app.py
 
 lock-check:
 	$(PYTHON) -m uv lock --check
 
 schema-export:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/export_schemas.py
+
+schema-check:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/export_schemas.py --check
 
 ingest:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/ingest_sources.py
@@ -26,21 +43,22 @@ compose-config:
 
 demo-replay-check:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/check_demo_replays.py
+	$(MAKE) replay-manifest-check
+
+replay-manifest-check:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/check_replay_manifest.py
 
 demo-capture:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/capture_demo_replays.py
 
 demo:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_demo.py --case-id case-001
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_demo.py --case-id demo-normal-001 --mode replay
 
 eval:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_eval.py --output data/results/offline-evaluation.json
-
-agent-eval:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_agent_eval.py --output data/results/agent-evaluation.json
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_eval.py --output $(EVAL_OUTPUT)
 
 security-check:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_security_checks.py --output data/results/security-evaluation.json
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_security_checks.py --output $(SECURITY_OUTPUT)
 
 dataset-check:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/check_finetune_dataset.py

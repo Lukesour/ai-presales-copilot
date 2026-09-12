@@ -1,0 +1,180 @@
+{
+  "securitySchemes": {
+    "bearerAuth": {
+      "type": "http",
+      "scheme": "bearer",
+      "bearerFormat": "JWT",
+      "description": "OIDC/JWT in deployed environments; explicit dev-token mode is local-only."
+    }
+  },
+  "parameters": {
+    "ProjectId": {
+      "name": "project_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "RunId": {
+      "name": "run_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "IdempotencyKey": {
+      "name": "Idempotency-Key",
+      "in": "header",
+      "required": true,
+      "description": "Stable caller-owned key for a single mutation intent.",
+      "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "ProjectHeader": {
+      "name": "X-Project-ID",
+      "in": "header",
+      "required": false,
+      "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "TenantHeader": {
+      "name": "X-Tenant-ID",
+      "in": "header",
+      "required": false,
+      "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "UserHeader": {
+      "name": "X-User-ID",
+      "in": "header",
+      "required": false,
+      "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "RolesHeader": {
+      "name": "X-Roles",
+      "in": "header",
+      "required": false,
+      "description": "Comma-separated local development roles.",
+      "schema": {
+        "type": "string",
+        "example": "presales,reviewer"
+      }
+    }
+  },
+  "schemas": {
+    "Problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "title", "status", "detail", "request_id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "errors": {
+          "type": "array",
+          "items": {}
+        }
+      }
+    },
+    "HealthResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "service", "version"],
+      "properties": {
+        "status": {
+          "const": "ok"
+        },
+        "service": {
+          "const": "presales-api"
+        },
+        "version": {
+          "const": "2.0.0"
+        }
+      }
+    },
+    "ReadinessResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "checks"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ready", "not_ready"]
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["database", "knowledge_index", "model"],
+          "properties": {
+            "database": {
+              "type": "boolean"
+            },
+            "knowledge_index": {
+              "type": "boolean"
+            },
+            "model": {
+              "type": "boolean"
+            },
+            "pgvector": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  "responses": {
+    "Problem": {
+      "description": "RFC 7807-like error response.",
+      "content": {
+        "application/problem+json": {
+          "schema": {
+            "$ref": "../components/http-boundary.json#/schemas/Problem"
+          }
+        },
+        "application/json": {
+          "schema": {
+            "$ref": "../components/http-boundary.json#/schemas/Problem"
+          }
+        }
+      }
+    }
+  }
+}

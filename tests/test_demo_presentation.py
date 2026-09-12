@@ -20,7 +20,6 @@ from ai_presales_copilot.demo_view import (
     build_solution_view,
     build_timeline_rows,
 )
-from ai_presales_copilot.schemas import CustomerBrief, CustomerBriefV2
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,21 +35,17 @@ def test_registered_replays_validate_all_v2_fields(scenarios):
         snapshot = load_demo_replay(ROOT / "data/demo/replays", scenario_id, scenarios=scenarios)
         view = build_solution_view(snapshot.states.final["response"])
         assert all(view["visible_fields"].values())
-        assert len(build_timeline_rows([event.model_dump() for event in snapshot.events])) == 11
+        assert len(build_timeline_rows([event.model_dump() for event in snapshot.events])) == 14
 
 
-def test_missing_scenario_exposes_exact_clarification_fields(scenarios):
-    state = scenarios["missing"].brief.model_dump(mode="json")
-    assert state["deployment"] == "未说明"
-    assert all(value is None for value in state["capacity"].values())
-    assert state["governance"]["egress_allowed"] is None
-    assert state["governance"]["residency"] is None
-    assert scenarios["missing"].expected.missing_fields == [
-        "deployment",
-        "capacity.peak_concurrency",
-        "capacity.latency_target",
-        "governance.residency",
-    ]
+def test_missing_then_clarified_replay_exposes_requirement_gate(scenarios):
+    snapshot = load_demo_replay(
+        ROOT / "data/demo/replays", "missing_then_clarified", scenarios=scenarios
+    )
+    assert snapshot.states.initial is not None
+    assert snapshot.states.initial["status"] == "needs_clarification"
+    assert snapshot.states.initial["response"] is None
+    assert snapshot.states.clarified["status"] == "ready_for_confirmation"
 
 
 def test_claim_evidence_one_to_many_and_unknown_reference_marker():
@@ -101,6 +96,29 @@ def test_timeline_labels_review_approval_separately_from_completion(scenarios):
     rows = build_timeline_rows([event.model_dump() for event in snapshot.events])
     review = next(row for row in rows if row["node"] == "human_review")
     assert review["status"] == "已通过"
+
+
+def test_requirements_first_timeline_has_one_row_per_node_and_surfaces_failure():
+    rows = build_timeline_rows(
+        [
+            {"event_type": "node_started", "node": "intake", "status": "running"},
+            {"event_type": "node_finished", "node": "intake", "status": "running", "state_version": 2},
+            {"event_type": "node_started", "node": "extract_requirements", "status": "running"},
+            {
+                "event_type": "model_unavailable",
+                "node": "done",
+                "failed_node": "extract_requirements",
+                "status": "model_unavailable",
+                "error_code": "model_unavailable",
+            },
+        ]
+    )
+    assert len(rows) == 14
+    assert [row["node"] for row in rows].count("intake") == 1
+    extraction = next(row for row in rows if row["node"] == "extract_requirements")
+    assert extraction["phase"] == "需求分析"
+    assert extraction["status"] == "模型不可用"
+    assert extraction["event"] == "模型不可用"
 
 
 def test_rendering_escapes_untrusted_model_text_and_preserves_nested_strategy():
@@ -175,29 +193,3 @@ def test_replay_rejects_path_traversal_and_invalid_snapshot(tmp_path, scenarios)
     (tmp_path / "high_risk.json").write_text(json.dumps(source), encoding="utf-8")
     with pytest.raises(ValueError, match="pending"):
         load_demo_replay(tmp_path, "high_risk", scenarios=scenarios)
-
-
-def test_legacy_conversion_normalizes_volume_and_latency_units():
-    brief = CustomerBrief(
-        case_id="legacy",
-        industry="制造业",
-        use_case="设备问答",
-        concurrency="日请求 500 次",
-        latency_requirement="首 Token 2 秒内",
-    )
-    converted = CustomerBriefV2.from_legacy(brief)
-    assert converted.capacity.daily_requests == 500
-    assert converted.capacity.peak_concurrency is None
-    assert converted.capacity.ttft_target_ms == 2000
-    assert converted.capacity.full_answer_target_ms is None
-
-    complete = CustomerBrief(
-        case_id="legacy-complete",
-        industry="制造业",
-        use_case="设备问答",
-        concurrency="峰值 20",
-        latency_requirement="完整答案 10 秒内",
-    )
-    converted_complete = CustomerBriefV2.from_legacy(complete)
-    assert converted_complete.capacity.peak_concurrency == 20
-    assert converted_complete.capacity.full_answer_target_ms == 10000

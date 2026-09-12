@@ -1,4 +1,6 @@
 {
+  "historical": true,
+  "historical_note": "Retired complete-Brief offline Agent report; evidence only, not a current runtime or evaluation input.",
   "mode": "presales-agent-offline",
   "summary": {
     "total": 24,

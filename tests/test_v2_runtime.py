@@ -19,6 +19,8 @@ from ai_presales_copilot.llm_agent import LocalModelWorkflow
 from ai_presales_copilot.persistence import CheckpointStore
 from ai_presales_copilot.schemas import ClaimV2, CustomerBriefV2, EvidenceChunkV2, SolutionDraftV2
 
+RAW_COMPLETE = "制造业客户希望减少停机损失。设备运维知识助手服务维修工程师，使用维修手册，部署在企业内网，数据驻留中国境内，数据可以出域。验收要求答案必须可引用。"
+
 
 class FakeModel:
     model = "fake-qwen3"
@@ -260,62 +262,62 @@ def test_fastapi_auth_idempotency_and_events():
             "X-Roles": "presales",
             "Idempotency-Key": "run-1",
         }
-        payload = {"brief": _brief(governance={"egress_allowed": False})}
-        first = client.post("/v1/projects/project-a/runs", headers=headers, json=payload)
+        payload = {
+            "input": {
+                "raw_request": RAW_COMPLETE,
+                "source": "meeting_notes",
+            }
+        }
+        first = client.post("/v2/projects/project-a/runs", headers=headers, json=payload)
         assert first.status_code == 200
         run_id = first.json()["run_id"]
-        assert first.json()["status"] == "waiting_for_review"
-        assert first.json()["error_code"] == "needs_review"
-        second = client.post("/v1/projects/project-a/runs", headers=headers, json=payload)
+        assert first.json()["status"] == "ready_for_confirmation"
+        assert first.json()["requirements_confirmed"] is False
+        second = client.post("/v2/projects/project-a/runs", headers=headers, json=payload)
         assert second.status_code == 200
         assert second.json()["run_id"] == run_id
-        changed_payload = client.post(
-            "/v1/projects/project-a/runs",
-            headers=headers,
-            json={"brief": _brief(raw_request="同一个幂等键不能替换原始需求")},
+        conflicting_payload = {
+            "input": {
+                "raw_request": "这是同一个幂等键下的不同客户需求。",
+                "source": "meeting_notes",
+            }
+        }
+        conflict = client.post(
+            "/v2/projects/project-a/runs", headers=headers, json=conflicting_payload
         )
-        assert changed_payload.status_code == 409
+        assert conflict.status_code == 409
         read_headers = {**headers, "X-Project-ID": "project-a"}
-        events = client.get(f"/v1/runs/{run_id}/events", headers=read_headers)
+        events = client.get(f"/v2/runs/{run_id}/events", headers=read_headers)
         assert events.status_code == 200
         assert events.json()["events"]
-        unauthorized = client.get(f"/v1/runs/{run_id}")
+        unauthorized = client.get(f"/v2/runs/{run_id}")
         assert unauthorized.status_code == 401
 
         other_tenant = client.get(
-            f"/v1/runs/{run_id}/events",
+            f"/v2/runs/{run_id}/events",
             headers={**read_headers, "X-Tenant-ID": "tenant-b"},
         )
         assert other_tenant.status_code == 404
 
-        review_headers = {
+        confirm_headers = {
             **read_headers,
-            "X-Roles": "reviewer",
-            "Idempotency-Key": "review-1",
+            "X-Roles": "presales",
+            "Idempotency-Key": "confirm-1",
         }
-        approved = client.post(
-            f"/v1/runs/{run_id}/reviews",
-            headers=review_headers,
-            json={"decision": "approve", "reason": "证据和边界已复核"},
+        confirmed = client.post(
+            f"/v2/runs/{run_id}/requirements/confirm",
+            headers=confirm_headers,
+            json={
+                "decision": "confirm",
+                "expected_state_version": first.json()["state_version"],
+                "acknowledged_warnings": first.json()["requirement_analysis"]["warning_fields"],
+            },
         )
-        assert approved.status_code == 200
-        assert approved.json()["status"] == "complete"
-        assert approved.json()["current_node"] == "done"
-        review_events = client.get(f"/v1/runs/{run_id}/events", headers=read_headers)
-        assert any(item["event_type"] == "review_approved" for item in review_events.json()["events"])
-        replay = client.post(
-            f"/v1/runs/{run_id}/reviews",
-            headers=review_headers,
-            json={"decision": "approve"},
-        )
-        assert replay.status_code == 200
-        assert replay.json()["state_version"] == approved.json()["state_version"]
-        conflict = client.post(
-            f"/v1/runs/{run_id}/reviews",
-            headers={**review_headers, "Idempotency-Key": "review-2"},
-            json={"decision": "reject"},
-        )
-        assert conflict.status_code == 409
+        assert confirmed.status_code == 200
+        assert confirmed.json()["requirements_confirmed"] is True
+        assert confirmed.json()["status"] in {"complete", "waiting_for_review", "model_unavailable"}
+        retired = client.post("/v1/projects/project-a/runs", headers=headers, json=payload)
+        assert retired.status_code in {404, 405}
 
 
 def test_ingestion_emits_hash_and_locator(tmp_path: Path):

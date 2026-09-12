@@ -9,9 +9,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self
 
+CHECKPOINT_FORMAT = "requirements-first-v2"
+CHECKPOINT_FORMAT_VERSION = 1
+
 
 class CheckpointConflictError(RuntimeError):
     """Raised when a stale reviewer tries to overwrite a newer state."""
+
+
+class CheckpointFormatError(RuntimeError):
+    """Raised when persisted state does not match the current checkpoint format."""
 
 
 class CheckpointStore:
@@ -77,6 +84,8 @@ class CheckpointStore:
             next_version = current_version + 1
             persisted_state = dict(state)
             persisted_state["state_version"] = next_version
+            persisted_state["state_format"] = CHECKPOINT_FORMAT
+            persisted_state["state_format_version"] = CHECKPOINT_FORMAT_VERSION
             self.connection.execute(
                 """
                 INSERT INTO agent_checkpoints(thread_id, state_json, updated_at, state_version)
@@ -103,7 +112,7 @@ class CheckpointStore:
             ).fetchone()
         if row is None:
             return None
-        return json.loads(row[0])
+        return _validate_checkpoint_payload(json.loads(row[0]))
 
     def load_by_run_id(self, run_id: str) -> dict[str, Any] | None:
         """Find a checkpoint by its public run id.
@@ -118,7 +127,7 @@ class CheckpointStore:
                 "SELECT state_json FROM agent_checkpoints ORDER BY updated_at DESC"
             ).fetchall()
         for (payload,) in rows:
-            state = json.loads(payload)
+            state = _validate_checkpoint_payload(json.loads(payload))
             if state.get("run_id") == run_id:
                 return state
         return None
@@ -230,8 +239,7 @@ class PostgresCheckpointStore:
             self.native_graph_checkpointer = PostgresSaver(self._native_graph_connection)
             self.native_graph_checkpointer.setup()
         except ImportError:
-            # Preserve compatibility with an older runtime image that has not
-            # installed the native saver package yet.
+            # The native saver is optional for the SQLite/dependency-light path.
             self.native_graph_checkpointer = None
 
     def save(
@@ -261,6 +269,8 @@ class PostgresCheckpointStore:
             next_version = current_version + 1
             persisted_state = dict(state)
             persisted_state["state_version"] = next_version
+            persisted_state["state_format"] = CHECKPOINT_FORMAT
+            persisted_state["state_format_version"] = CHECKPOINT_FORMAT_VERSION
             cursor.execute(
                 """
                 INSERT INTO agent_checkpoints(thread_id, state_json, updated_at, state_version)
@@ -278,7 +288,7 @@ class PostgresCheckpointStore:
         with self._lock, self.connection.cursor() as cursor:
             cursor.execute("SELECT state_json FROM agent_checkpoints WHERE thread_id = %s", (thread_id,))
             row = cursor.fetchone()
-        return dict(row[0]) if row else None
+        return _validate_checkpoint_payload(dict(row[0])) if row else None
 
     def load_by_run_id(self, run_id: str) -> dict[str, Any] | None:
         with self._lock, self.connection.cursor() as cursor:
@@ -287,7 +297,7 @@ class PostgresCheckpointStore:
                 (run_id,),
             )
             row = cursor.fetchone()
-        return dict(row[0]) if row else None
+        return _validate_checkpoint_payload(dict(row[0])) if row else None
 
     def thread_for_run_id(self, run_id: str) -> str | None:
         state = self.load_by_run_id(run_id)
@@ -339,3 +349,19 @@ def create_checkpoint_store(location: str | Path):
     if value.startswith(("postgres://", "postgresql://")):
         return PostgresCheckpointStore(value)
     return CheckpointStore(value)
+
+
+def _validate_checkpoint_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise CheckpointFormatError("checkpoint payload is not an object; local clean reset is required")
+    if payload.get("state_format") != CHECKPOINT_FORMAT:
+        raise CheckpointFormatError(
+            "checkpoint format is unsupported or missing; old state is not converted, "
+            "and an authorized local clean reset is required"
+        )
+    if payload.get("state_format_version") != CHECKPOINT_FORMAT_VERSION:
+        raise CheckpointFormatError(
+            "checkpoint format version is unsupported; create a new local checkpoint store "
+            "after confirming the old data can be retained"
+        )
+    return payload

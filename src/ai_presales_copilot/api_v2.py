@@ -1,9 +1,8 @@
-"""FastAPI transport for the versioned local-model workflow.
+"""FastAPI transport for the requirements-first v2 workflow.
 
-The legacy ``http.server`` adapter remains in :mod:`ai_presales_copilot.api`
-for the original portfolio fixtures.  This module is the Phase 0/1 API: it
-uses v2 contracts, a local development token, tenant/project checks, request
-ids, idempotent run/review mutations, and a single problem response shape.
+The service owns only the current public ``/v2`` contract. External provider
+protocols such as a llama-server OpenAI-compatible ``/v1`` endpoint are kept
+behind their client boundaries and are not project routes.
 """
 
 from __future__ import annotations
@@ -14,7 +13,9 @@ import os
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import Field
 
 try:
     from fastapi import Request
@@ -24,8 +25,14 @@ except ImportError:  # pragma: no cover - runtime extra only
 from .knowledge import KnowledgeBase
 from .llama_client import LlamaClient, LlamaClientError
 from .llm_agent import LocalModelWorkflow
-from .persistence import CheckpointConflictError
-from .schemas import CustomerBriefV2, StrictModel
+from .persistence import CheckpointConflictError, CheckpointFormatError
+from .schemas import (
+    ClarificationRequestV2,
+    CustomerInputV2,
+    RequirementConfirmRequestV2,
+    RunInputRequestV2,
+    StrictModel,
+)
 
 
 class APIError(RuntimeError):
@@ -91,19 +98,21 @@ class LocalTokenAuth:
         return AuthContext(tenant_id, user_id, roles)
 
 
-class RunRequest(StrictModel):
-    brief: CustomerBriefV2
+class V2ReviewRequest(StrictModel):
+    """Review mutation with mandatory optimistic concurrency control."""
 
-
-class ReviewRequest(StrictModel):
-    decision: str
+    decision: Literal["approve", "reject"]
     reason: str | None = None
+    state_version: int = Field(..., ge=0)
 
 
-class FeedbackRequest(StrictModel):
-    rating: int | None = None
+class V2FeedbackRequest(StrictModel):
+    """Feedback mutation with mandatory optimistic concurrency control."""
+
+    rating: int | None = Field(default=None, ge=1, le=5)
     label: str | None = None
     comment: str | None = None
+    state_version: int = Field(..., ge=0)
 
 
 def create_fastapi_app(
@@ -117,8 +126,8 @@ def create_fastapi_app(
 ):
     """Create the Phase 1 FastAPI application.
 
-    Imports are local so the legacy dependency-light fixtures can still import
-    the package without importing Uvicorn or Starlette at module import time.
+    Imports are local so dependency-light tooling can import the package
+    without importing Uvicorn or Starlette at module import time.
     """
 
     try:
@@ -151,7 +160,7 @@ def create_fastapi_app(
             content_length_value = 1_000_001
         if content_length_value > 1_000_000:
             response = _problem(413, "request body exceeds 1 MB", "payload_too_large", request_id)
-        elif request.url.path.startswith("/v1") and not _allow_request(
+        elif request.url.path.startswith("/v2") and not _allow_request(
             request.client.host if request.client else "unknown", rate_window, rate_lock, rate_limit
         ):
             response = _problem(429, "rate limit exceeded", "rate_limited", request_id)
@@ -234,16 +243,22 @@ def create_fastapi_app(
             return JSONResponse(status_code=503, content=payload)
         return payload
 
-    @app.post("/v1/projects/{project_id}/runs")
-    async def create_run(project_id: str, request: Request):
+    # ------------------------------------------------------------------
+    # Requirements-first v2 transport.
+    # ------------------------------------------------------------------
+
+    @app.post("/v2/projects/{project_id}/runs")
+    async def create_input_run(project_id: str, request: Request):
         context = _require_context(request, token_auth, {"presales", "reviewer", "admin"})
-        body = await _parse_body(request)
-        request_payload = RunRequest.model_validate(body)
+        payload = RunInputRequestV2.model_validate(await _parse_body(request))
         idempotency_key = _required_idempotency(request)
+        input_payload = payload.input
+        if payload.source is not None:
+            input_payload = input_payload.model_copy(update={"source": payload.source})
         thread_id = _idempotent_thread(context, project_id, idempotency_key)
         try:
-            state = workflow.run(
-                request_payload.brief,
+            state = workflow.start_input(
+                input_payload,
                 thread_id=thread_id,
                 tenant_id=context.tenant_id,
                 project_id=project_id,
@@ -253,46 +268,117 @@ def create_fastapi_app(
             )
         except CheckpointConflictError as exc:
             raise APIError(409, str(exc), code="conflict") from exc
+        except CheckpointFormatError as exc:
+            raise APIError(409, str(exc), code="checkpoint_format_unsupported") from exc
         except PermissionError as exc:
             raise APIError(403, str(exc), code="forbidden") from exc
         return _public_state(state)
 
-    @app.get("/v1/runs/{run_id}")
-    async def get_run(run_id: str, request: Request):
+    @app.get("/v2/runs/{run_id}")
+    async def get_input_run(run_id: str, request: Request):
         context = _require_context(request, token_auth, {"viewer", "presales", "reviewer", "admin"})
         state = _load_authorized_state(
             checkpoint_store, run_id, context, requested_project=request.headers.get("x-project-id")
         )
         return _public_state(state)
 
-    @app.get("/v1/runs/{run_id}/events")
-    async def get_events(run_id: str, request: Request):
+    @app.get("/v2/runs/{run_id}/events")
+    async def get_input_events(run_id: str, request: Request):
         context = _require_context(request, token_auth, {"viewer", "presales", "reviewer", "admin"})
         state = _load_authorized_state(
             checkpoint_store, run_id, context, requested_project=request.headers.get("x-project-id")
         )
-        thread_id = str(state["thread_id"])
-        return {"run_id": run_id, "events": checkpoint_store.events(thread_id)}
+        return {"run_id": run_id, "events": checkpoint_store.events(str(state["thread_id"]))}
 
-    @app.post("/v1/runs/{run_id}/reviews")
-    async def review_run(run_id: str, request: Request):
+    @app.post("/v2/runs/{run_id}/clarifications")
+    async def clarify_input_run(run_id: str, request: Request):
+        context = _require_context(request, token_auth, {"presales", "reviewer", "admin"})
+        body = ClarificationRequestV2.model_validate(await _parse_body(request))
+        idempotency_key = _required_idempotency(request)
+        expected_state_version = (
+            body.expected_state_version
+            if body.expected_state_version is not None
+            else body.state_version
+        )
+        if expected_state_version is None:
+            raise APIError(400, "state_version is required", code="state_version_required")
+        state = _load_authorized_state(
+            checkpoint_store, run_id, context, requested_project=request.headers.get("x-project-id")
+        )
+        try:
+            updated = workflow.add_clarification(
+                thread_id=str(state["thread_id"]),
+                message=body.message,
+                overrides=body.overrides,
+                expected_state_version=expected_state_version,
+                idempotency_key=idempotency_key,
+                tenant_id=context.tenant_id,
+                project_id=state.get("project_id"),
+                user_id=context.user_id,
+                roles=list(context.roles),
+            )
+        except CheckpointConflictError as exc:
+            raise APIError(409, str(exc), code="conflict") from exc
+        except PermissionError as exc:
+            raise APIError(403, str(exc), code="forbidden") from exc
+        except ValueError as exc:
+            raise APIError(422, str(exc), code="invalid_clarification") from exc
+        return _public_state(updated)
+
+    @app.post("/v2/runs/{run_id}/requirements/confirm")
+    async def confirm_input_requirements(run_id: str, request: Request):
+        context = _require_context(request, token_auth, {"presales", "reviewer", "admin"})
+        body = RequirementConfirmRequestV2.model_validate(await _parse_body(request))
+        idempotency_key = _required_idempotency(request)
+        expected_state_version = (
+            body.expected_state_version
+            if body.expected_state_version is not None
+            else body.state_version
+        )
+        if expected_state_version is None:
+            raise APIError(400, "state_version is required", code="state_version_required")
+        state = _load_authorized_state(
+            checkpoint_store, run_id, context, requested_project=request.headers.get("x-project-id")
+        )
+        try:
+            updated = workflow.confirm_requirements(
+                thread_id=str(state["thread_id"]),
+                acknowledged_warnings=body.acknowledged_warnings,
+                expected_state_version=expected_state_version,
+                idempotency_key=idempotency_key,
+                tenant_id=context.tenant_id,
+                project_id=state.get("project_id"),
+                user_id=context.user_id,
+                roles=list(context.roles),
+            )
+        except CheckpointConflictError as exc:
+            raise APIError(409, str(exc), code="conflict") from exc
+        except PermissionError as exc:
+            raise APIError(403, str(exc), code="forbidden") from exc
+        except ValueError as exc:
+            raise APIError(422, str(exc), code="requirements_not_confirmable") from exc
+        return _public_state(updated)
+
+    @app.post("/v2/runs/{run_id}/reviews")
+    async def review_input_run(run_id: str, request: Request):
         context = _require_context(request, token_auth, {"reviewer", "admin"})
-        body = ReviewRequest.model_validate(await _parse_body(request))
+        body = V2ReviewRequest.model_validate(await _parse_body(request))
         if body.decision not in {"approve", "reject"}:
             raise APIError(422, "decision must be approve or reject", code="invalid_review")
         idempotency_key = _required_idempotency(request)
         state = _load_authorized_state(
             checkpoint_store, run_id, context, requested_project=request.headers.get("x-project-id")
         )
-        review = state.get("review", {})
-        if review.get("idempotency_key") == idempotency_key:
-            return _public_state(state)
+        if body.state_version != int(state.get("state_version", 0)):
+            raise APIError(409, "state version conflict", code="conflict")
         if state.get("status") != "waiting_for_review":
             raise APIError(409, "run is not waiting for human review", code="review_not_pending")
+        if state.get("review", {}).get("idempotency_key") == idempotency_key:
+            return _public_state(state)
         try:
             updated = workflow.run(
                 None,
-                thread_id=state["thread_id"],
+                thread_id=str(state["thread_id"]),
                 tenant_id=context.tenant_id,
                 project_id=state.get("project_id"),
                 user_id=context.user_id,
@@ -309,10 +395,10 @@ def create_fastapi_app(
             raise APIError(403, str(exc), code="forbidden") from exc
         return _public_state(updated)
 
-    @app.post("/v1/runs/{run_id}/feedback")
-    async def feedback_run(run_id: str, request: Request):
+    @app.post("/v2/runs/{run_id}/feedback")
+    async def feedback_input_run(run_id: str, request: Request):
         context = _require_context(request, token_auth, {"presales", "reviewer", "admin"})
-        body = FeedbackRequest.model_validate(await _parse_body(request))
+        body = V2FeedbackRequest.model_validate(await _parse_body(request))
         if body.rating is None and not body.label and not body.comment:
             raise APIError(422, "feedback must contain a rating, label, or comment", code="invalid_feedback")
         if body.rating is not None and not 1 <= body.rating <= 5:
@@ -321,18 +407,20 @@ def create_fastapi_app(
         state = _load_authorized_state(
             checkpoint_store, run_id, context, requested_project=request.headers.get("x-project-id")
         )
-        existing = [item for item in state.get("feedback", []) if item.get("idempotency_key") == idempotency_key]
-        if existing:
+        if body.state_version != int(state.get("state_version", 0)):
+            raise APIError(409, "state version conflict", code="conflict")
+        if any(item.get("idempotency_key") == idempotency_key for item in state.get("feedback", [])):
             return _public_state(state)
-        feedback = {
-            "rating": body.rating,
-            "label": body.label,
-            "comment": body.comment,
-            "user_id": context.user_id,
-            "created_at": _utc_now(),
-            "idempotency_key": idempotency_key,
-        }
-        state.setdefault("feedback", []).append(feedback)
+        state.setdefault("feedback", []).append(
+            {
+                "rating": body.rating,
+                "label": body.label,
+                "comment": body.comment,
+                "user_id": context.user_id,
+                "created_at": _utc_now(),
+                "idempotency_key": idempotency_key,
+            }
+        )
         expected = int(state.get("state_version", 0))
         try:
             version = checkpoint_store.save(state["thread_id"], state, expected_version=expected)
@@ -346,8 +434,8 @@ def create_fastapi_app(
         )
         return _public_state(state)
 
-    @app.post("/v1/chat/completions")
-    async def chat_completion(request: Request):
+    @app.post("/v2/chat/completions")
+    async def requirements_chat_completion(request: Request):
         context = _require_context(request, token_auth, {"presales", "reviewer", "admin"})
         body = await _parse_body(request)
         messages = body.get("messages")
@@ -362,15 +450,9 @@ def create_fastapi_app(
             raise APIError(422, "messages must contain user content", code="invalid_request")
         idempotency_key = _required_idempotency(request)
         project_id = request.headers.get("x-project-id", "default")
-        brief = CustomerBriefV2(
-            case_id=f"chat-{hashlib.sha256(idempotency_key.encode()).hexdigest()[:16]}",
-            industry="企业",
-            use_case="AI 解决方案售前分析",
-            raw_request=user_text,
-        )
         try:
-            state = workflow.run(
-                brief,
+            state = workflow.start_input(
+                CustomerInputV2(raw_request=user_text, source="chat"),
                 thread_id=_idempotent_thread(context, project_id, idempotency_key),
                 tenant_id=context.tenant_id,
                 project_id=project_id,
@@ -380,16 +462,9 @@ def create_fastapi_app(
             )
         except CheckpointConflictError as exc:
             raise APIError(409, str(exc), code="conflict") from exc
-        except PermissionError as exc:
-            raise APIError(403, str(exc), code="forbidden") from exc
+        except CheckpointFormatError as exc:
+            raise APIError(409, str(exc), code="checkpoint_format_unsupported") from exc
         public = _public_state(state)
-        content = public.get("response") or {
-            "schema_version": "2.0",
-            "status": state.get("status"),
-            "run_id": state.get("run_id"),
-            "error_code": state.get("error_code"),
-            "risks": state.get("risks", []),
-        }
         return {
             "id": f"chatcmpl-{state['run_id']}",
             "object": "chat.completion",
@@ -399,7 +474,7 @@ def create_fastapi_app(
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": json.dumps(content, ensure_ascii=False)},
+                    "message": {"role": "assistant", "content": json.dumps(public, ensure_ascii=False)},
                     "finish_reason": "stop",
                 }
             ],
@@ -442,7 +517,10 @@ def _load_authorized_state(
     *,
     requested_project: str | None = None,
 ) -> dict[str, Any]:
-    state = store.load_by_run_id(run_id)
+    try:
+        state = store.load_by_run_id(run_id)
+    except CheckpointFormatError as exc:
+        raise APIError(409, str(exc), code="checkpoint_format_unsupported") from exc
     if state is None:
         raise APIError(404, "run not found", code="not_found")
     if state.get("tenant_id", "local") != context.tenant_id:
@@ -469,9 +547,19 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "thread_id": state.get("thread_id"),
         "tenant_id": state.get("tenant_id"),
         "project_id": state.get("project_id"),
+        "phase": state.get("phase", "solution" if state.get("response") else "requirements"),
         "status": state.get("status"),
         "current_node": state.get("current_node"),
         "state_version": state.get("state_version", 0),
+        "input": state.get("input"),
+        "input_turns": state.get("input_turns", []),
+        "brief": state.get("intake_brief", state.get("brief", {})),
+        "requirement_facts": state.get("requirement_facts", []),
+        "requirement_conflicts": state.get("requirement_conflicts", []),
+        "requirement_analysis": state.get("requirement_analysis", {}),
+        "requirements_confirmed": bool(state.get("requirements_confirmed", False)),
+        "extraction_mode": state.get("extraction_mode", "model"),
+        "structured_schema_fallbacks": state.get("structured_schema_fallbacks", []),
         "response": state.get("response"),
         # Keep only the deterministic missing-field projection public; prompts,
         # policy matches, and other internal workflow state stay server-owned.

@@ -56,6 +56,7 @@ class LlamaClient:
         temperature: float = 0.0,
         max_tokens: int = 256,
         response_schema: dict[str, Any] | None = None,
+        json_mode: bool = False,
     ) -> GenerationResult:
         payload = {
             "model": self.model,
@@ -66,15 +67,20 @@ class LlamaClient:
         }
         if response_schema is not None:
             wire_schema = _inline_local_refs(response_schema)
-            # Current llama-server accepts schema-constrained output through
-            # the OpenAI-compatible response_format shape.  Keep the direct
-            # json_schema option too: it is understood by older server builds
-            # and makes the request portable to the native completion layer.
-            # The caller still validates the body after HTTP 200 because some
-            # model/server combinations can return a successful but invalid
-            # structured response.
-            payload["response_format"] = {"type": "json_schema", "schema": wire_schema}
+            # llama.cpp supports its schema-constrained path through a JSON
+            # object response plus the top-level ``json_schema`` extension.
+            # Do not send ``type=json_schema`` and the top-level extension at
+            # the same time: several server builds compile both grammar
+            # definitions and fail with ``Failed to initialize samplers``.
+            # The caller still validates the body after HTTP 200 because a
+            # compatible server may accept the request without enforcing it.
+            payload["response_format"] = {"type": "json_object"}
             payload["json_schema"] = wire_schema
+        elif json_mode:
+            # This is an explicit, observable fallback for server builds that
+            # cannot compile a particular JSON Schema into GBNF.  The caller
+            # still performs full host-side Pydantic validation.
+            payload["response_format"] = {"type": "json_object"}
         started = time.perf_counter()
         body = self._post("/v1/chat/completions", payload)
         latency_ms = (time.perf_counter() - started) * 1000
@@ -107,7 +113,7 @@ class LlamaClient:
         }
         if response_schema is not None:
             wire_schema = _inline_local_refs(response_schema)
-            payload["response_format"] = {"type": "json_schema", "schema": wire_schema}
+            payload["response_format"] = {"type": "json_object"}
             payload["json_schema"] = wire_schema
         started = time.perf_counter()
         first_token_at: float | None = None

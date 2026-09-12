@@ -13,7 +13,7 @@ import threading
 from collections.abc import Iterable
 
 from .ingestion import ChunkRecord, IngestedSource
-from .schemas import Evidence
+from .schemas import EvidenceChunkV2
 
 
 class PostgresKnowledgeIndex:
@@ -182,7 +182,7 @@ class PostgresKnowledgeIndex:
         tenant_id: str | None = None,
         roles: Iterable[str] = (),
         source_ids: set[str] | None = None,
-    ) -> list[Evidence]:
+    ) -> list[EvidenceChunkV2]:
         """Search the durable index with scope filters applied in SQL.
 
         The Compose baseline uses PostgreSQL's ``simple`` tsvector index. A
@@ -247,14 +247,14 @@ class PostgresKnowledgeIndex:
             cursor.execute(sql, params)
             rows = cursor.fetchall()
         return [
-            Evidence(
+            EvidenceChunkV2(
                 evidence_id=row[0],
-                title=row[3],
-                excerpt=row[4],
-                source_path=row[11] or "knowledge",
-                relevance=min(1.0, float(row[16] or 0.01)),
                 source_id=row[1],
                 source_url=row[10],
+                source_path=row[11] or "knowledge",
+                title=row[3],
+                excerpt=row[4],
+                relevance=min(1.0, float(row[16] or 0.01)),
                 version=row[2],
                 license=row[12],
                 page=row[5],

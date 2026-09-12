@@ -1,0 +1,19 @@
+{
+  "get": {
+    "operationId": "getHealth",
+    "summary": "Report service liveness.",
+    "security": [],
+    "responses": {
+      "200": {
+        "description": "Service is alive.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../components/http-boundary.json#/schemas/HealthResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

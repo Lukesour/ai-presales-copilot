@@ -49,7 +49,7 @@ commit: 当前 GitHub main 的最新 commit
 
 如果 notebook 报“已有错误项目目录”，说明当前 runtime 中 `/content` 残留了旧 clone。选择 Runtime → Disconnect and delete runtime，再通过上面的固定链接重新打开并连接；不要手动把旧目录改名后继续训练。
 
-notebook 已经负责：安装 `finetune-colab` extra、保留 Colab 自带 PyTorch/CUDA、检查 GPU、重建 72 条合成数据、保存 `pip-freeze` 和 runtime 元数据、把训练输出直接写入 Drive、训练后比较 base/adapter、打包结果。
+notebook 已经负责：安装 `finetune-colab` extra、保留 Colab 自带 PyTorch/CUDA、检查 GPU、重建当前 12 条合成数据、保存 `pip-freeze` 和 runtime 元数据、把训练输出直接写入 Drive、训练后比较 base/adapter、打包结果。历史 T4 报告使用的 24/72 数据规模仅作为历史证据保留。
 
 ## 3. 手动路径（notebook 无法打开时）
 
@@ -107,7 +107,7 @@ print(round(torch.cuda.get_device_properties(0).total_memory / 1024**3, 2), "GB"
 !PYTHONPATH=src python scripts/train_qlora.py --dry-run
 ```
 
-预期结果：train/dev/test 为 `42/12/18`，总计 72 条；ID 唯一；assistant target 全部是合法 JSON；manifest 中的 SHA-256 校验通过；dry-run 输出 `dataset and training configuration parsed successfully`。随后 token audit 会报告各 split 的 p50/p90/max 和是否超过 `max_length`。如果数据检查或 token audit 失败，不要继续启动正式训练。
+预期结果：当前 train/dev/test 为 `6/3/3`，总计 12 条；ID 唯一；assistant target 全部是合法 JSON；manifest 中的 SHA-256 校验通过；dry-run 输出 `dataset and training configuration parsed successfully`。随后 token audit 会报告各 split 的 p50/p90/max 和是否超过 `max_length`。如果数据检查或 token audit 失败，不要继续启动正式训练。
 
 ### 3.4 正式训练
 
