@@ -16,8 +16,8 @@
 
 ## 失败门
 
-- llama-server 不可用：方案节点状态为 `model_unavailable`，没有伪造的固定模板方案；需求抽取最多进入带 `deterministic_fallback` 标记的保守原文匹配路径，仍不能绕过需求门。
-- 模型返回非法 JSON/不符合 schema：最多一次结构化重试；需求抽取失败可安全降级并停在需求门，方案节点仍为 `model_unavailable`。
+- llama-server 不可用：需求抽取和方案节点都返回 `model_unavailable`，没有规则解析或伪造的固定模板方案，也不能绕过需求门。
+- 模型返回非法 JSON/不符合 schema：最多一次结构化重试；需求抽取仍失败时返回 `model_unavailable` 并停在需求门，方案节点同样返回 `model_unavailable`，不使用规则解析或固定模板补齐。
 - 模型引用未知 `evidence_id`：引用被丢弃，claim 标记 `needs_review`，并触发审核风险。
 - 未授权 tenant/project/role：检索前拒绝，不能通过生成后删除文本来“隔离”。
 - 远程资料未在来源登记、非 HTTPS、robots 不允许或解析发现敏感内容：导入失败并保留原因。

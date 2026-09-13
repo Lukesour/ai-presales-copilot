@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 
 from ai_presales_copilot.demo_controller import (
     confirm_requirements_session,
@@ -14,15 +13,10 @@ from ai_presales_copilot.demo_controller import (
     new_session,
     refresh_session,
     render_session,
-    select_mode,
     submit_clarification_session,
 )
-from ai_presales_copilot.demo_replay import load_demo_scenarios
 from ai_presales_copilot.demo_view import build_control_state
 
-ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_PATH = ROOT / "data/demo/scenarios.json"
-REPLAY_DIR = ROOT / "data/demo/replays"
 
 def build_app(mode: str = "api"):
     try:
@@ -32,58 +26,66 @@ def build_app(mode: str = "api"):
     if mode != "api":
         raise ValueError("the Gradio workbench only supports the formal API boundary")
 
-    scenarios = load_demo_scenarios(SCENARIO_PATH)
+    # This workbench is intentionally Live API only.  Offline replay remains
+    # a repository evaluation artifact, not a user-facing runtime mode.
+    scenarios = {}
     api_url = os.environ.get("PRESALES_API_URL", "http://127.0.0.1:8090").rstrip("/")
     token = os.environ.get("PRESALES_API_TOKEN", os.environ.get("PRESALES_DEV_TOKEN", "dev-token"))
 
-    replay_case = os.environ.get("PRESALES_REPLAY_CASE", "normal")
-    if replay_case not in scenarios:
-        replay_case = "normal"
-    initial_session = select_mode(new_session(), "replay", replay_case, scenarios, str(REPLAY_DIR), api_url, token)
+    initial_session = refresh_session(new_session(), scenarios, api_url, token)
+    initial_controls = build_control_state(initial_session)
 
-    def control_updates(session):
+    def control_updates(session, *, clear_clarification=False):
         controls = build_control_state(session)
+        clarification_input_update = gr.update(
+            interactive=controls["clarification_input_interactive"]
+        )
+        if clear_clarification:
+            clarification_input_update = gr.update(
+                interactive=controls["clarification_input_interactive"],
+                value="",
+            )
         return (
             gr.update(interactive=controls["clarification_interactive"]),
             gr.update(interactive=controls["confirmation_interactive"]),
             gr.update(interactive=controls["review_interactive"]),
             gr.update(interactive=controls["review_interactive"]),
-            gr.update(interactive=controls["replay_case_interactive"]),
+            clarification_input_update,
         )
 
-    def update(session):
-        return (session, *render_session(session, scenarios), *control_updates(session))
+    def update(session, *, clear_clarification=False):
+        return (
+            session,
+            *render_session(session, scenarios),
+            *control_updates(session, clear_clarification=clear_clarification),
+        )
 
     def on_refresh(session):
         return update(refresh_session(session, scenarios, api_url, token))
 
-    def on_mode(selected, raw_request, session):
-        current = session or new_session()
-        current["raw_request"] = raw_request or current.get("raw_request", "")
-        return update(select_mode(current, selected, current.get("scenario_id", replay_case), scenarios, str(REPLAY_DIR), api_url, token))
-
-    def on_replay_case(selected_case, raw_request, session):
-        current = session or new_session()
-        current["raw_request"] = raw_request or current.get("raw_request", "")
-        case_id = selected_case if selected_case in scenarios else replay_case
-        return update(select_mode(current, "replay", case_id, scenarios, str(REPLAY_DIR), api_url, token))
-
-    def on_analyze(selected_mode, raw_request, session):
+    def on_analyze(raw_request, session):
         current = session or new_session()
         current["raw_request"] = raw_request or ""
-        return update(generate_session(current, selected_mode, current.get("scenario_id", replay_case), scenarios, str(REPLAY_DIR), api_url, token))
+        if not current["raw_request"].strip():
+            current["message"] = "请先填写客户原始需求。"
+            return update(current)
+        return update(generate_session(current, "live", "live", scenarios, "", api_url, token))
 
     def on_clarify(message, session):
-        return update(
-            submit_clarification_session(
-                session, message, scenarios, str(REPLAY_DIR), api_url, token
-            )
+        current = submit_clarification_session(
+            session, message, scenarios, "", api_url, token
         )
+        submitted = (
+            current.get("replay_stage") == "clarified"
+            if current.get("mode") == "replay"
+            else current.get("message") is None
+        )
+        return update(current, clear_clarification=submitted)
 
     def on_confirm(session):
         return update(
             confirm_requirements_session(
-                session, scenarios, str(REPLAY_DIR), api_url, token
+                session, scenarios, "", api_url, token
             )
         )
 
@@ -95,18 +97,7 @@ def build_app(mode: str = "api"):
             "# AI Presales Copilot · 需求优先工作台\n"
             "先判断客户需求是否具备做方案的条件，再进入检索、方案、POC、证据和审核。"
         )
-        with gr.Row():
-            mode_picker = gr.Radio(
-                [("Demo Replay（默认离线）", "replay"), ("Live API", "live")],
-                value="replay",
-                label="运行模式",
-            )
-            replay_case_picker = gr.Dropdown(
-                choices=list(scenarios),
-                value=replay_case,
-                label="Replay 场景（仅 Replay）",
-                info="选择 missing_then_clarified 可演示‘提交补充信息’分支。",
-            )
+        gr.Markdown("**运行模式：** Live API（实时大模型）")
         raw_input = gr.Textbox(
             value=initial_session.get("raw_request", ""),
             lines=8,
@@ -131,12 +122,22 @@ def build_app(mode: str = "api"):
             clarifications = gr.Markdown(label="澄清问题")
             clarification_input = gr.Textbox(
                 lines=5,
-                label="补充信息（仅在需要澄清时使用）",
+                label="补充信息（澄清或需求补充）",
+                info="仅在需求分析完成后可提交；每个 run 最多 3 个澄清回合。",
                 placeholder="回答上方问题；每个 run 最多 3 个澄清回合。",
+                interactive=initial_controls["clarification_input_interactive"],
             )
             with gr.Row():
-                clarify_button = gr.Button("提交补充信息", variant="primary")
-                confirm_button = gr.Button("确认需求并生成方案", variant="primary")
+                clarify_button = gr.Button(
+                    "提交补充信息",
+                    variant="primary",
+                    interactive=initial_controls["clarification_interactive"],
+                )
+                confirm_button = gr.Button(
+                    "确认需求并生成方案",
+                    variant="primary",
+                    interactive=initial_controls["confirmation_interactive"],
+                )
 
         with gr.Tab("方案交付"):
             summary = gr.Markdown()
@@ -166,10 +167,16 @@ def build_app(mode: str = "api"):
             risks = gr.Dataframe(headers=["分类", "等级", "原因", "处理动作"], label="风险")
             review = gr.JSON(label="审核状态")
             with gr.Row():
-                approve = gr.Button("人工审核通过")
-                reject = gr.Button("人工审核拒绝")
+                approve = gr.Button(
+                    "人工审核通过",
+                    interactive=initial_controls["review_interactive"],
+                )
+                reject = gr.Button(
+                    "人工审核拒绝",
+                    interactive=initial_controls["review_interactive"],
+                )
         with gr.Tab("运行元数据"):
-            metadata = gr.JSON(label="运行元数据与 Replay 边界")
+            metadata = gr.JSON(label="运行元数据")
             with gr.Accordion("原始 v2 状态（技术细节）", open=False):
                 raw = gr.JSON(label="状态快照")
 
@@ -179,13 +186,16 @@ def build_app(mode: str = "api"):
             implementation, poc, model_strategy, assumptions, clarifications,
             claim_evidence, evidence, risks, review, timeline, metadata, raw,
             clarify_button, confirm_button, approve, reject,
-            replay_case_picker,
+            clarification_input,
         ]
-        analyze_button.click(on_analyze, [mode_picker, raw_input, session_state], outputs)
+        analyze_button.click(on_analyze, [raw_input, session_state], outputs)
         refresh_button.click(on_refresh, [session_state], outputs)
-        mode_picker.change(on_mode, [mode_picker, raw_input, session_state], outputs)
-        replay_case_picker.change(on_replay_case, [replay_case_picker, raw_input, session_state], outputs)
-        clarify_button.click(on_clarify, [clarification_input, session_state], outputs)
+        clarification_submit = clarify_button.click(
+            lambda: gr.update(interactive=False),
+            outputs=[clarify_button],
+            queue=False,
+        )
+        clarification_submit.then(on_clarify, [clarification_input, session_state], outputs)
         confirm_button.click(on_confirm, [session_state], outputs)
         approve.click(lambda session: on_decide("approve", session), [session_state], outputs)
         reject.click(lambda session: on_decide("reject", session), [session_state], outputs)
@@ -196,9 +206,24 @@ def build_app(mode: str = "api"):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("api",), default="api")
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
+        help="Bind address for the local workbench.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")),
+        help="Fixed port; fail fast instead of silently selecting another UI port.",
+    )
     parser.add_argument("--share", action="store_true", help="Ask Gradio to create a temporary share link")
     args = parser.parse_args()
-    build_app(args.mode).launch(share=args.share)
+    build_app(args.mode).launch(
+        server_name=args.host,
+        server_port=args.port,
+        share=args.share,
+    )
     return 0
 
 

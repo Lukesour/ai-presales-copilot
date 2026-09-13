@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a registered v2 case through API, Replay or Dify."""
+"""Run a registered v2 case through the Live API or Dify comparison adapter."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ai_presales_copilot.demo_replay import load_demo_replay, load_demo_scenarios
+from ai_presales_copilot.demo_replay import load_demo_scenarios
 from ai_presales_copilot.dify_client import DifyClient, DifyClientError
 from ai_presales_copilot.schemas import CustomerInputV2
 
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case-id", default="demo-normal-001")
-    parser.add_argument("--mode", choices=("api", "dify", "replay"), default="api")
+    parser.add_argument("--mode", choices=("api", "dify"), default="api")
     parser.add_argument("--api-url", default=os.getenv("PRESALES_API_URL", "http://127.0.0.1:8090"))
     parser.add_argument("--token", default=os.getenv("PRESALES_API_TOKEN", "dev-token"))
     parser.add_argument("--tenant", default=os.getenv("PRESALES_TENANT_ID", "local"))
@@ -46,11 +46,6 @@ def main() -> int:
             state = _run_api(args, customer_input)
         elif args.mode == "dify":
             state = DifyClient().chat(customer_input).model_dump(mode="json")
-        else:
-            replay = load_demo_replay(
-                ROOT / "data/demo/replays", scenario.scenario_id, scenarios=scenarios
-            )
-            state = replay.states.final
     except (DifyClientError, RuntimeError, urllib.error.URLError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 3

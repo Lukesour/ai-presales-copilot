@@ -3,7 +3,7 @@ PYTHONPATH := src
 SECURITY_OUTPUT ?= data/results/security-evaluation.json
 EVAL_OUTPUT ?= data/results/offline-evaluation.json
 
-.PHONY: governance openapi-build openapi-check file-length test lint demo eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check schema-export schema-check ingest self-qa lock-check compose-config demo-replay-check replay-manifest-check demo-capture
+.PHONY: governance openapi-build openapi-check file-length test lint demo demo-live eval security-check dataset-check build-finetune-dataset finetune-token-audit finetune-dry-run finetune-eval benchmark-llama summarize-benchmarks dify-check schema-export schema-check ingest self-qa lock-check compose-config demo-replay-check replay-manifest-check demo-capture
 
 governance:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/check_governance.py
@@ -52,7 +52,10 @@ demo-capture:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/capture_demo_replays.py
 
 demo:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_demo.py --case-id demo-normal-001 --mode replay
+	$(MAKE) demo-live
+
+demo-live:
+	PYTHONPATH=src:. uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
 
 eval:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/run_eval.py --output $(EVAL_OUTPUT)

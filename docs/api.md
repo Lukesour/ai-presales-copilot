@@ -1,17 +1,19 @@
 # Phase 1 API
 
-默认入口是 `scripts/serve_agent.py` 的 FastAPI v2 服务。项目公共 HTTP 契约由 `contracts/openapi/src/` 维护，`contracts/openapi/dist/` 是生成 bundle。
+默认入口是 `scripts/start_local_demo.py` 的单终端 Live API 启动器；它启动 llama-server、FastAPI v2
+和 Gradio，并按 `/v1/models`、`/readyz` 顺序做就绪检查。项目公共 HTTP 契约由
+`contracts/openapi/src/` 维护，`contracts/openapi/dist/` 是生成 bundle。
 
 ## 启动
 
 ```bash
-PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 --model qwen3-8b-q4
+PRESALES_DEV_TOKEN=dev-token \
+  uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
 ```
 
-`--model` 必须与 llama-server 的 `--alias`（或 `/v1/models` 中的模型 id）一致。若本地启动的是
-`--alias qwen3-1.7b-demo`，请将上面的 `--model` 改为 `qwen3-1.7b-demo`；服务不会静默选择
-第一个可用模型。
+启动器默认使用 `models/Qwen3-1.7B-Q4_K_M.gguf`、alias `qwen3-1.7b-demo`、8080/8090/7860；
+它会把同一个 alias 同时传给 llama-server 和 FastAPI，不会静默选择第一个可用模型。若只需
+调试 FastAPI 边界，可直接运行 `scripts/serve_agent.py`，但它不是本机演示的推荐启动方式。
 
 `/healthz` 是进程存活检查；`/readyz` 同时检查 checkpoint 数据库、知识索引和 llama-server。模型检查不仅访问 llama-server `/health`，还核对 `/v1/models` 是否包含 API 配置的模型。`/readyz` 返回 200 `{"status":"ready"}` 或 503 `{"status":"not_ready","checks":{...}}`，前者才允许演示页面创建 Live run。失败时 `checks` 会保留安全的 `*_error_code` 和必要诊断；例如 `checkpoint_format_unsupported` 要求保留旧库并使用显式迁移或 clean reset，不会静默转换。业务接口需要 `Authorization: Bearer <token>`。开发 token 还支持 `X-Tenant-ID`、`X-User-ID`、`X-Roles`，共享部署必须替换成 OIDC/JWT 校验器。
 
@@ -22,7 +24,7 @@ PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
 | 方法 | 路径 | 最低角色 | 说明 |
 |---|---|---|---|
 | POST | `/v2/projects/{project_id}/runs` | presales | 只接收 `input.raw_request`，创建需求分析 run |
-| POST | `/v2/runs/{run_id}/clarifications` | presales | 追加最多 3 个澄清回合，重新抽取和评估 |
+| POST | `/v2/runs/{run_id}/clarifications` | presales | 在 `needs_clarification` 或 `ready_for_confirmation` 阶段追加最多 3 个澄清/补充回合，重新抽取和评估 |
 | POST | `/v2/runs/{run_id}/requirements/confirm` | presales | 确认关键需求和警告假设后进入方案图 |
 | GET | `/v2/runs/{run_id}` | viewer | 读取原始输入、brief、字段事实、完整性分析和响应 |
 | GET | `/v2/runs/{run_id}/events` | viewer | 读取需求门、方案节点和审核事件 |
@@ -63,7 +65,7 @@ PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
 
 `RequirementFactV2` 的 `status` 区分 `stated`、`confirmed`、`inferred`、`missing`、`ambiguous`、`conflicting`；`stated/confirmed` 必须带 `source_turn_id` 和服务端验证过的 `source_quote`。完整性目录由代码计算，模型不能自行把推断值升级为客户事实。
 
-需求状态还会返回 `extraction_mode`：正常为 `model`；本地模型或 schema 失败后若能从原文安全匹配则为 `deterministic_fallback`。后者只生成带原文片段的保守需求事实，仍停在 `needs_clarification` 或 `ready_for_confirmation`，不会检索或生成方案。方案节点的结构化输出失败仍进入 `model_unavailable`，不会用固定模板补齐。
+需求状态还会返回 `extraction_mode`，Live API 正常值为 `model`。需求抽取使用实时模型的小字段组 JSON 输出；主机只做结构、类型、原文引用和完整性校验。模型不可用、结构化输出无法校验或引用无法落到客户原文时，不进入任何规则解析 fallback，而是返回 `model_unavailable` 或继续停在 `needs_clarification`。处于 `ready_for_confirmation` 时仍可提交新增补充信息，服务端会追加不可变输入轮次并重新评估；只有再次确认后才进入方案图。方案节点的结构化输出失败仍进入 `model_unavailable`，不会用固定模板补齐。
 
 ## 项目边界
 
@@ -101,10 +103,11 @@ PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
 
 `POST /v2/chat/completions` 不绕过鉴权、检索或审核。`choices[0].message.content` 是 v2 JSON 字符串，顶层 `run_id` 可用于查询事件和提交审核。
 
-## 求职演示 Replay
+## 离线契约快照（非产品入口）
 
 `data/demo/replays/` 保存由 `scripts/capture_demo_replays.py` 从正式 API 捕获的脱敏合成快照。
 `scripts/check_demo_replays.py` 不启动模型、不访问网络，只校验案例注册、v2 响应、事件顺序和 Claim—Evidence 引用。
 
-Replay 页面不会调用 `/readyz`、创建 run 或提交审核；高风险案例的“审核通过”只是从 `pending`
-快照切换到 `final` 快照，并明确显示“未写入真实运行状态”。
+离线快照检查不会调用 `/readyz`、创建 run 或提交审核；高风险案例的“审核通过”只是从 `pending`
+快照切换到 `final` 快照，并明确显示“未写入真实运行状态”。它只用于 CI/契约回归，Live 产品页面
+没有 Replay 运行模式。

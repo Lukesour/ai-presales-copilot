@@ -176,8 +176,6 @@ def build_ui_values(session: Mapping[str, Any], scenarios: Mapping[str, Any]) ->
         banner += f"\n\n**当前状态：** `{html.escape(str(state['status']))}`"
     if state.get("error_code"):
         banner += f"\n\n**错误码：** `{html.escape(str(state['error_code']))}`"
-    if state.get("extraction_mode") == "deterministic_fallback":
-        banner += "\n\n**需求抽取：** 本轮使用保守原文匹配降级；请核对字段引用后再确认需求。"
     errors = state.get("errors") or []
     if errors:
         banner += f"\n\n**执行诊断：** {html.escape(str(errors[0]))}"
@@ -187,9 +185,16 @@ def build_ui_values(session: Mapping[str, Any], scenarios: Mapping[str, Any]) ->
     if status == "needs_clarification":
         banner += "\n\n**下一步：** 补充缺失的关键需求，方案生成已阻断；此时可提交补充信息。"
     elif status == "ready_for_confirmation":
-        banner += "\n\n**下一步：** 确认需求和警告项假设后，才会进入检索与方案生成；当前没有待澄清阻断字段，提交补充信息按钮保持禁用。"
+        if session.get("mode") == "live":
+            banner += "\n\n**下一步：** 可直接确认需求；如还有新增信息，也可提交补充信息并重新评估。"
+        else:
+            banner += "\n\n**下一步：** 确认需求和警告项假设后，才会进入检索与方案生成；当前没有待澄清阻断字段，Replay 不支持追加补充信息。"
+    elif status == "model_unavailable":
+        banner += "\n\n**下一步：** 当前 run 已进入方案阶段且模型不可用，不能再向该 run 追加补充信息；请修改上方原始需求并重新点击“分析需求”创建新 run。"
     elif status in {"complete", "waiting_for_review"}:
         banner += "\n\n**方案阶段：** 已通过需求确认门，当前展示可追溯方案或审核状态。"
+    elif session.get("mode") == "live" and not status:
+        banner += "\n\n**下一步：** 先填写上方客户原始需求并点击“分析需求”；补充信息框当前可先输入草稿，需求分析完成后才能提交。"
     replay = session.get("replay_snapshot") or {}
     provenance = solution["provenance"] or replay.get("provenance", {})
     brief = state.get("brief") if isinstance(state.get("brief"), Mapping) else {}

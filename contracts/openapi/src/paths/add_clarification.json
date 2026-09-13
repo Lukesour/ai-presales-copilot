@@ -10,6 +10,7 @@
   "post": {
     "operationId": "addRunClarification",
     "summary": "Add customer clarification and re-assess requirements.",
+    "description": "Append one bounded customer clarification or supplemental requirement turn while the run is in needs_clarification or ready_for_confirmation. The latter creates a new requirement assessment revision and never bypasses the confirmation gate.",
     "parameters": [
       {
         "$ref": "../components/http-boundary.json#/parameters/IdempotencyKey"

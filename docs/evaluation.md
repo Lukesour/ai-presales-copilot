@@ -31,7 +31,7 @@ make finetune-dry-run
 
 在本机依赖环境中，当前 clean-break 基线为：
 
-- Python 单元测试：63 passed（包含需求优先 API、幂等、冲突检测、Replay 分支、原生 interrupt/resume、llama.cpp schema transport 和保守抽取 fallback 测试）。
+- Python 单元测试：覆盖需求优先 API、幂等、冲突检测、Replay 快照分支、原生 interrupt/resume、llama.cpp schema transport，以及模型不可用时的 fail-closed 测试。
 - 当前 4 条注册 Replay：schema `4/4`、需求门 `4/4`、高风险审核分支 `1/1`；证据存在和无证据保守分支按 `make eval` 的 summary 单独报告。
 - 红队策略用例：12/12 通过。
 - 当前微调数据：12 条对话，来自 4 条注册 Replay，每个场景最多 3 个变体；train 6、dev 3、test 3，输入包含当前需求优先上下文，target 为紧凑 JSON。

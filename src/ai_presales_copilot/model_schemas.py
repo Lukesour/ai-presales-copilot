@@ -11,6 +11,24 @@ from __future__ import annotations
 
 from typing import Any
 
+REQUIREMENT_FACT_PATHS = (
+    "business_goal",
+    "use_case",
+    "target_users",
+    "data_types",
+    "deployment",
+    "governance.residency",
+    "acceptance_criteria",
+    "industry",
+    "capacity.peak_concurrency",
+    "capacity.latency_target",
+    "integrations",
+    "budget",
+    "timeline",
+    "governance.audit_required",
+    "governance.egress_allowed",
+)
+
 
 def _nullable(kind: str) -> dict[str, Any]:
     return {"type": [kind, "null"]}
@@ -28,127 +46,47 @@ def _nullable_number() -> dict[str, Any]:
     return _nullable("number")
 
 
-def _requirements_brief_schema() -> dict[str, Any]:
-    properties: dict[str, Any] = {
-        "schema_version": {"type": "string", "enum": ["2.0"]},
-        "case_id": {"type": "string"},
-        "industry": _nullable("string"),
-        "business_goal": _nullable("string"),
-        "use_case": _nullable("string"),
-        "target_users": _string_list(),
-        "current_process": _nullable("string"),
-        "data_types": _string_list(),
-        "deployment": _nullable("string"),
-        "capacity": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "peak_concurrency": _nullable_integer(),
-                "daily_requests": _nullable_integer(),
-                "ttft_target_ms": _nullable_integer(),
-                "full_answer_target_ms": _nullable_integer(),
-            },
-            "required": [
-                "peak_concurrency",
-                "daily_requests",
-                "ttft_target_ms",
-                "full_answer_target_ms",
-            ],
-        },
-        "governance": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "residency": _nullable("string"),
-                "egress_allowed": {"type": ["boolean", "null"]},
-                "audit_required": {"type": ["boolean", "null"]},
-            },
-            "required": ["residency", "egress_allowed", "audit_required"],
-        },
-        "budget": _nullable("string"),
-        "timeline": _nullable("string"),
-        "integrations": _string_list(),
-        "acceptance_criteria": _string_list(),
-    }
-    return {
+def _requirement_fact_entry_schema() -> dict[str, Any]:
+    fact_value_schema = {
         "type": "object",
         "additionalProperties": False,
-        "properties": properties,
-        "required": list(properties),
+        "properties": {
+            "value": {"type": "string"},
+            "quote": {"type": "string"},
+        },
+        "required": ["value", "quote"],
+    }
+    return fact_value_schema
+
+
+def requirements_group_schema(field_paths: tuple[str, ...]) -> dict[str, Any]:
+    """Return a small schema for one model extraction group.
+
+    llama.cpp turns JSON Schema into a grammar.  Keeping each request to a
+    small, flat object avoids the semantic field drift and grammar expansion
+    seen with one large repeated fact schema while retaining hard JSON shape
+    constraints at the model boundary.
+    """
+
+    unknown = set(field_paths) - set(REQUIREMENT_FACT_PATHS)
+    if unknown:
+        raise ValueError(f"unsupported requirement fields: {', '.join(sorted(unknown))}")
+    fact_value_schema = _requirement_fact_entry_schema()
+    return {
+        "title": "RequirementExtractionGroupModelOutput",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {path: fact_value_schema for path in field_paths},
+        "required": list(field_paths),
     }
 
 
 def requirements_extraction_schema() -> dict[str, Any]:
-    """Return the bounded schema used only during raw-requirement extraction."""
+    """Return the complete flat schema used by schema export checks."""
 
-    fact_paths = [
-        "business_goal",
-        "use_case",
-        "target_users",
-        "data_types",
-        "deployment",
-        "governance.residency",
-        "acceptance_criteria",
-        "industry",
-        "capacity.peak_concurrency",
-        "capacity.latency_target",
-        "integrations",
-        "budget",
-        "timeline",
-        "governance.audit_required",
-    ]
-    fact_properties = {
-        "field_path": {"type": "string", "enum": fact_paths},
-        "display_name": {"type": "string"},
-        "value_text": _nullable("string"),
-        "status": {
-            "type": "string",
-            "enum": ["stated", "confirmed", "inferred", "missing", "ambiguous", "conflicting"],
-        },
-        "importance": {"type": "string", "enum": ["blocking", "warning"]},
-        "confidence": _nullable_number(),
-        "source_turn_id": _nullable("string"),
-        "source_quote": _nullable("string"),
-        "start_char": _nullable_integer(),
-        "end_char": _nullable_integer(),
-    }
-    conflict_properties = {
-        "field_path": {"type": "string"},
-        "description": {"type": "string"},
-        "source_turn_ids": _string_list(4),
-        "resolution_question": {"type": "string"},
-    }
-    return {
-        "title": "RequirementExtractionModelOutput",
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "schema_version": {"type": "string", "enum": ["2.0"]},
-            "brief": _requirements_brief_schema(),
-            "facts": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": fact_properties,
-                    "required": list(fact_properties),
-                },
-                "maxItems": 16,
-            },
-            "conflicts": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": conflict_properties,
-                    "required": list(conflict_properties),
-                },
-                "maxItems": 8,
-            },
-            "assumptions": _string_list(8),
-        },
-        "required": ["schema_version", "brief", "facts", "conflicts", "assumptions"],
-    }
+    schema = requirements_group_schema(REQUIREMENT_FACT_PATHS)
+    schema["title"] = "RequirementExtractionModelOutput"
+    return schema
 
 
 def solution_draft_schema() -> dict[str, Any]:

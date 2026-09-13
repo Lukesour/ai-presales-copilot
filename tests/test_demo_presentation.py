@@ -143,6 +143,13 @@ def test_readiness_view_distinguishes_ready_and_not_ready():
     assert not_ready["checks_rows"] == [{"check": "model", "status": "失败"}]
 
 
+def test_readiness_view_distinguishes_replay_from_live_failure():
+    replay = build_readiness_view({"status": "skipped", "checks": {}})
+    assert replay["ready"] is False
+    assert replay["label"] == "Replay 模式（无需 Live API）"
+    assert "未检查 Live API" in replay["message"]
+
+
 def test_readiness_view_names_the_actual_checkpoint_failure():
     view = build_readiness_view(
         {
@@ -191,8 +198,45 @@ def test_replay_clarification_scenario_enables_the_submission_control(scenarios)
     controls = build_control_state(session)
     assert session["public_state"]["status"] == "needs_clarification"
     assert controls["clarification_interactive"] is True
+    assert controls["clarification_input_interactive"] is True
     assert controls["confirmation_interactive"] is False
     assert controls["replay_case_interactive"] is True
+
+
+def test_ready_for_confirmation_disables_clarification_input_and_submission():
+    controls = build_control_state(
+        {
+            "mode": "replay",
+            "public_state": {"status": "ready_for_confirmation"},
+        }
+    )
+    assert controls["clarification_interactive"] is False
+    assert controls["clarification_input_interactive"] is False
+    assert controls["confirmation_interactive"] is True
+
+
+def test_live_ready_for_confirmation_allows_supplemental_information():
+    controls = build_control_state(
+        {
+            "mode": "live",
+            "public_state": {"status": "ready_for_confirmation"},
+        }
+    )
+    assert controls["clarification_interactive"] is True
+    assert controls["clarification_input_interactive"] is True
+    assert controls["confirmation_interactive"] is True
+
+
+def test_live_without_run_allows_supplemental_draft_but_not_submission():
+    controls = build_control_state(
+        {
+            "mode": "live",
+            "public_state": {},
+        }
+    )
+    assert controls["clarification_input_interactive"] is True
+    assert controls["clarification_interactive"] is False
+    assert controls["confirmation_interactive"] is False
 
 
 def test_ready_for_confirmation_explains_why_clarification_is_disabled():
@@ -203,6 +247,45 @@ def test_ready_for_confirmation_explains_why_clarification_is_disabled():
     }
     values = build_ui_values(session, {})
     assert "当前没有待澄清阻断字段" in values["banner"]
+
+
+def test_live_ready_for_confirmation_explains_supplemental_revision():
+    session = {
+        "mode": "live",
+        "public_state": {"status": "ready_for_confirmation"},
+        "readiness": {"status": "ready", "checks": {}},
+    }
+    values = build_ui_values(session, {})
+    assert "提交补充信息并重新评估" in values["banner"]
+
+
+def test_live_without_run_explains_the_required_first_step():
+    values = build_ui_values(
+        {
+            "mode": "live",
+            "public_state": {},
+            "readiness": {"status": "ready", "checks": {}},
+        },
+        {},
+    )
+    assert "先填写上方客户原始需求" in values["banner"]
+    assert "当前可先输入草稿" in values["banner"]
+
+
+def test_model_unavailable_explains_that_a_new_run_is_required():
+    values = build_ui_values(
+        {
+            "mode": "live",
+            "public_state": {
+                "status": "model_unavailable",
+                "run_id": "run-1",
+                "error_code": "model_unavailable",
+            },
+            "readiness": {"status": "ready", "checks": {}},
+        },
+        {},
+    )
+    assert "重新点击“分析需求”创建新 run" in values["banner"]
 
 
 def test_replay_approval_is_local_and_does_not_need_api(monkeypatch, scenarios):

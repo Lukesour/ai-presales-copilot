@@ -255,7 +255,11 @@ def build_readiness_view(payload: Mapping[str, Any] | None, *, error: str | None
     return {
         "status": status,
         "ready": status == "ready",
-        "label": "Live API 就绪" if status == "ready" else "Live API 未就绪",
+        "label": (
+            "Replay 模式（无需 Live API）"
+            if status == "skipped"
+            else "Live API 就绪" if status == "ready" else "Live API 未就绪"
+        ),
         "checks": dict(checks),
         "checks_rows": [
             {"check": key, "status": "通过" if checks[key] is True else "失败"}
@@ -273,8 +277,18 @@ def build_control_state(session: Mapping[str, Any] | None) -> dict[str, bool]:
     data = session or {}
     state = data.get("public_state") if isinstance(data.get("public_state"), Mapping) else {}
     status = state.get("status")
+    has_run = bool(data.get("run_id") or state.get("run_id"))
+    clarification_allowed = status == "needs_clarification" or (
+        data.get("mode") == "live" and status == "ready_for_confirmation"
+    )
+    live_draft_allowed = (
+        data.get("mode") == "live"
+        and not has_run
+        and status not in {"complete", "waiting_for_review", "rejected", "needs_review", "model_unavailable"}
+    )
     return {
-        "clarification_interactive": status == "needs_clarification",
+        "clarification_interactive": clarification_allowed,
+        "clarification_input_interactive": clarification_allowed or live_draft_allowed,
         "confirmation_interactive": status == "ready_for_confirmation",
         "review_interactive": status == "waiting_for_review",
         "replay_case_interactive": data.get("mode") == "replay",
@@ -285,7 +299,7 @@ def render_mode_banner(mode: str, readiness: Mapping[str, Any] | None = None) ->
     if mode == "replay":
         return "### Demo Replay · 静态快照 · 非实时模型调用\n不访问 API、数据库或模型服务。"
     if readiness and not readiness.get("ready"):
-        return f"### Live API 未就绪\n{readiness.get('message') or '请先启动依赖服务，或切换到 Demo Replay。'}"
+        return f"### Live API 未就绪\n{readiness.get('message') or '请先启动 llama-server 和 Presales API。'}"
     return "### Live API · 实时 Agent 执行\n生成前会再次校验 `/readyz`。"
 
 
@@ -294,6 +308,8 @@ def _readiness_message(
     checks: Mapping[str, Any],
     error: str | None,
 ) -> str:
+    if status == "skipped":
+        return "未检查 Live API；请启动 Live API 后刷新 readiness。"
     if status == "ready":
         return "Live API 已就绪。"
     if error or status == "unreachable":
@@ -324,7 +340,7 @@ def _readiness_message(
         }
         dependencies = "、".join(labels.get(key, key) for key in failed)
         return f"Live API 未就绪，已阻止创建 run：失败依赖为 {dependencies}。请查看 `/readyz` 检查详情。"
-    return "Live API 未就绪，已阻止创建 run；请先启动依赖服务，或切换到 Demo Replay。"
+    return "Live API 未就绪，已阻止创建 run；请先启动 llama-server 和 Presales API。"
 
 
 def _summary_markdown(payload: Mapping[str, Any]) -> str:

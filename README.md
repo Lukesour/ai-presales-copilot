@@ -15,7 +15,7 @@
 
 正式入口先接收客户原始文本或会议纪要，不接受已经填好的完整 Brief 作为新流程入口。系统展示字段状态、置信度、原文引用、缺失/冲突/警告；关键字段未补齐或未确认时，不会检索企业知识，也不会生成方案。项目只维护 `/v2` 公共 API；Dify 和 llama-server 的上游 `/v1` 协议属于外部边界。
 
-第一阶段固定为 Docker Compose + 本地 Qwen3-8B GGUF（默认 Q4）+ llama-server + PostgreSQL/pgvector。模型权重不进 Git；方案节点没有可用模型或结构化输出非法时，结果是 `model_unavailable`，不会回退到固定模板伪造方案。需求抽取失败时只允许进入标记为 `deterministic_fallback` 的保守原文匹配路径，仍停在需求澄清/确认门，不会生成方案。
+第一阶段固定为 Docker Compose + 本地 Qwen3-8B GGUF（默认 Q4）+ llama-server + PostgreSQL/pgvector。模型权重不进 Git；方案节点或需求抽取没有可用模型、结构化输出非法或来源无法验证时，结果是 `model_unavailable` 或需求澄清，不会回退到固定模板或规则解析伪造事实。
 
 ## 可运行能力
 
@@ -59,10 +59,10 @@ PDF/DOCX 资料解析需要额外安装 `knowledge` extra：
 uv sync --locked --extra runtime --extra dev --extra knowledge
 ```
 
-运行正式 API Demo（需先启动上面的 Compose，并准备本地模型）：
+启动正式 Live API Demo（单终端启动 llama-server、Presales API 和 Gradio，并准备本地模型）：
 
 ```bash
-uv run python scripts/run_demo.py --case-id demo-normal-001 --mode replay
+PRESALES_DEV_TOKEN=dev-token uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
 ```
 
 启动 Phase 1 Compose（需要先准备模型文件）：
@@ -78,18 +78,36 @@ curl -s http://127.0.0.1:8090/healthz
 curl -s http://127.0.0.1:8090/readyz
 ```
 
-也可以在本机运行 API，模型服务仍需先由 `llama-server` 在 `LLAMA_BASE_URL` 提供服务：
+本机 Live API 推荐使用仓库提供的单终端启动器。它会按“llama-server → `/v1/models` →
+Presales API → `/readyz` → Gradio”的顺序启动，并把相同的模型 alias 注入模型服务和 API；
+按 `Ctrl-C` 会向三个子进程发送退出信号并清理进程组：
 
 ```bash
-PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 \
-  --model qwen3-8b-q4
+uv sync --locked --extra runtime --extra demo
+PRESALES_DEV_TOKEN=dev-token \
+  uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
 ```
 
-`--model` 必须与 llama-server 的 `--alias`（或 `/v1/models` 返回的 `id`）一致。
-本机若按 `--alias qwen3-1.7b-demo` 启动 1.7B 模型，应将上面的值改为
-`qwen3-1.7b-demo`。API 默认使用新的 `.runtime/agent/checkpoints-v2.db`；旧的
-`.runtime/agent/checkpoints.db` 会保留，不会被静默转换或删除。
+已同步提供等价入口：`make demo-live`。
+
+默认使用 `models/Qwen3-1.7B-Q4_K_M.gguf`、alias `qwen3-1.7b-demo`、llama-server
+`8080`、Presales API `8090` 和 Gradio `7860`。模型路径、可执行文件和端口都可通过环境变量或
+启动参数覆盖，例如：
+
+```bash
+LLAMA_SERVER_BIN=/path/to/llama-server PRESALES_MODEL_PATH=models/Qwen3-1.7B-Q4_K_M.gguf \
+  PRESALES_LLAMA_PORT=18080 PRESALES_API_PORT=18090 PRESALES_UI_PORT=17860 \
+  uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
+```
+
+启动器拒绝已占用端口，不会自动跳到 7861。若启动失败，先检查精确监听者，再关闭原终端中的进程：
+
+```bash
+lsof -nP -iTCP:8080 -iTCP:8090 -iTCP:7860 | rg 'LISTEN|COMMAND'
+```
+
+API 默认使用新的 `.runtime/agent/checkpoints-v2.db`；旧的 `.runtime/agent/checkpoints.db`
+会保留，不会被静默转换或删除。
 
 创建一条需求优先 run：
 
@@ -115,15 +133,11 @@ curl -s http://127.0.0.1:8090/v2/runs/<run_id>/reviews \
   -d '{"decision":"approve","reason":"已核对部署边界和引用","state_version":12}' # 替换为响应中的 state_version
 ```
 
-启动 Gradio 页面（调用正式 API，不直接操作 Agent）：
-
-```bash
-uv sync --locked --extra demo
-PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
-```
-
-Gradio 页面默认使用 `Demo Replay`，首屏先展示一条登记过的合成客户原始需求；页面不再提供场景下拉框或“辅助示例”按钮，避免把预填 Brief 误认为正式输入入口。切换到 `Live API` 后，页面加载、刷新和每次实时分析前都会检查 `/readyz`。
-如果数据库、知识库或模型未就绪，会阻止创建 run，但不会影响 `Demo Replay`。
+上述单终端启动器已经启动 Gradio 页面（只调用正式 Live API，不直接操作 Agent）。打开终端打印的
+唯一地址，默认是 `http://127.0.0.1:7860`。页面没有 Replay 运行模式；Live API readiness 未通过时，
+页面会阻止创建 run，并明确要求启动 llama-server/API。需求分析完成后，补充信息框和提交按钮才可用。
+Gradio 固定监听启动器指定的端口，端口冲突会明确失败，不会静默切换到其他地址。
+如果数据库、知识库或模型未就绪，会阻止创建 run并显示具体 readiness 错误。
 
 排查 Live API 时先查看：
 
@@ -136,15 +150,14 @@ v2 格式不兼容；保留旧库并使用新的默认路径重启，或执行�
 旧 JSON 补上格式字段。`checks.model_error_code=model_mismatch` 表示 API 的
 `--model` 与 llama-server 的 `--alias` 不一致。
 
-无模型或无 API 环境也可以直接运行求职演示：
+离线 Replay 仅作为仓库测试/评测快照，不是产品启动模式。真实演示必须启动 Live API：
 
 ```bash
 PYTHONPATH=src python scripts/check_demo_replays.py
-PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
+PRESALES_DEV_TOKEN=dev-token uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
 ```
 
-Replay 仍保留正常、信息缺失后补充、高风险审核和冲突/注入阻断四条离线验收分支，但只通过仓库校验和环境变量选择，不作为首屏输入控件。需要查看其他登记分支时，可在启动前设置 `PRESALES_REPLAY_CASE=high_risk`。任意新文本必须切换到 `Live API`。
-Replay 是静态快照，不访问 API、数据库或模型，也不代表生产模型效果。
+Replay 快照仍由 CI 门禁校验，用于没有依赖服务时的自动化回归，不接受用户新文本，也不代表生产模型效果。
 
 重新从可用的正式 API 捕获快照（不会自动覆盖已有文件）：
 
@@ -178,7 +191,7 @@ Compose 环境请按 [`deploy/README.md`](deploy/README.md) 同时撤回 Postgre
 - 产品事实必须绑定知识库证据，不把模型记忆当作承诺。
 - 缺少部署、容量、合规或产品证据时，输出风险和待确认问题。
 - 高风险结论必须经过人工审核，Agent 不直接修改生产系统或外发消息。
-- 对外演示入口是 `local-model` API 或当前 Replay。需求抽取的确定性 fallback 只负责保守识别原文事实，不是方案模板，也不能绕过确认门。
+- 对外演示入口只有 Live API。需求抽取只使用实时大模型；主机负责 JSON/Pydantic、来源引用和完整性闸门，模型失败时不会使用规则解析或固定模板代替。
 - 合成案例和本机基准只用于工程演示，不代表客户生产准确率、SLA 或容量。
 - 模型微调只承载稳定的格式、分类和决策行为，持续变化的事实由 RAG 提供。
 

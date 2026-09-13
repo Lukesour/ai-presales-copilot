@@ -8,32 +8,30 @@
 make demo-replay-check
 ```
 
-如果要演示 Live API，再启动 FastAPI、checkpoint 和 llama-server：
+如果要演示 Live API，使用单终端启动器：
 
 ```bash
-PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 \
-  --model qwen3-8b-q4
+uv sync --locked --extra runtime --extra demo
+PRESALES_DEV_TOKEN=dev-token \
+  uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
 ```
 
-若手工启动 llama-server 时使用了其他 `--alias`，将 `--model` 改成相同的值。若本机
-已有旧 `.runtime/agent/checkpoints.db`，当前 API 默认使用新的 v2 checkpoint 路径；旧库
-不会被删除或静默转换。
+也可以使用等价入口 `make demo-live`。
 
-打开页面：
+启动器先等待 llama-server 的 `/v1/models` 暴露 `qwen3-1.7b-demo`，再等待 Presales API
+的 `/readyz` 返回 200，最后启动 Gradio；默认页面是 `http://127.0.0.1:7860`。它固定端口，
+不会像 Gradio 默认行为一样自动切到 7861；端口冲突时应先关闭旧进程或显式覆盖三个端口。
+按 `Ctrl-C` 会清理启动器创建的三个子进程。若本机已有旧 `.runtime/agent/checkpoints.db`，
+当前 API 默认使用新的 v2 checkpoint 路径；旧库不会被删除或静默转换。
 
-```bash
-uv sync --locked --extra demo
-PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
-```
-
-页面默认是 `Demo Replay`。Replay 不访问网络、数据库或模型；Live 模式才检查 `/readyz`，任意新文本也只能在 Live 模式提交。
+用户演示只使用 Live API：启动器检查 `/v1/models` 和 `/readyz`，任一依赖未就绪就不启动可交互流程。
+Live 尚未创建 run 时，补充信息框允许先输入草稿，提交按钮要等首次需求分析完成后才启用；没有规则解析或 Replay 兜底。
 
 ## 0:00–0:20：输入客户原始需求
 
 “售前方案不能从预填 Brief 或辅助示例开始。我先粘贴客户原始需求，让系统判断现在是否具备做方案的条件。”
 
-展示大文本框和“分析需求”。强调：Replay 中的文本是仓库登记的合成输入，不是固定模板伪造；Live 使用 `/v2/projects/{project_id}/runs` 创建真实需求分析 run。Replay 场景选择器只用于切换登记快照，不会把辅助示例伪装成正式输入入口。
+展示大文本框和“分析需求”。强调：Live 使用 `/v2/projects/{project_id}/runs` 创建真实需求分析 run；模型未就绪时请求会被 readiness 闸门阻止。
 
 ## 0:20–0:50：需求解析和缺口分析
 
@@ -47,7 +45,7 @@ PRESALES_API_TOKEN=dev-token uv run python demo/gradio_app.py --mode api
 
 ## 0:50–1:20：补充信息和需求确认
 
-在 Replay 场景选择器中选择 `missing_then_clarified`，点击“分析需求”后即可提交澄清回答，展示：
+在 Live 页面粘贴客户补充信息，点击“提交补充信息”，展示：
 
 ```text
 initial_input → extracted_requirements → needs_clarification
@@ -62,23 +60,24 @@ initial_input → extracted_requirements → needs_clarification
 
 ## 1:45–2:20：高风险审核
 
-若需要展示高风险分支，重新启动页面前设置 `PRESALES_REPLAY_CASE=high_risk`，确认需求后展示：
+若需要展示高风险分支，在 Live 输入中明确数据出域和审计要求，确认需求后展示：
 
 ```text
 requirements_confirmed → retrieve → ... → pending_review → approve → final
 ```
 
-说明数据不能出域和审计要求为什么触发审核。Live 模式调用正式审核 API；Replay 的“通过”只切换已登记的静态快照，并明确标注未写入真实运行状态。
+说明数据不能出域和审计要求为什么触发审核；审核调用正式 Live API，不切换静态快照。
 
 ## 2:20–2:50：证据与拒绝分支
 
 打开“证据追溯”：一个 Claim 对应多个 evidence 时拆成多行；没有证据的事实转成 `unknown/needs_review`，不输出产品承诺。
 
-若需要展示拒绝分支，重新启动页面前设置 `PRESALES_REPLAY_CASE=conflict_or_injection`，展示输入被阻断，且没有检索、草案和最终方案事件。
+若需要展示拒绝分支，在 Live API 中输入互相冲突或包含提示词注入的客户原文，展示输入被阻断，
+且没有检索、草案和最终方案事件；不要切换到离线回放。
 
 ## 2:50–3:00：边界说明
 
-“这是求职演示：案例和资料是合成的，Replay 是静态快照，离线评测和单机基准不等于生产 SLA。生产化还需要 OIDC/JWT、目标硬件容量测试、真实数据治理和企业连接器。主线证明的是从客户原话到可追溯方案的闭环。”
+“这是求职演示：案例和资料是合成的，离线契约快照和单机基准不等于生产 SLA。生产化还需要 OIDC/JWT、目标硬件容量测试、真实数据治理和企业连接器。主线证明的是从客户原话到可追溯方案的闭环。”
 
 ## 快照维护
 

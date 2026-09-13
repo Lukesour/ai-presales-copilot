@@ -57,7 +57,7 @@ stateDiagram-v2
 
 ## LangGraph 适配边界
 
-`src/ai_presales_copilot/llm_agent.py` 的正式路径直接构建并执行 `StateGraph`；需求抽取的模型/schema 失败可进入带事件和 `extraction_mode` 标记的确定性原文匹配 fallback，但仍必须通过同一完整性评估和确认门；方案节点模型不可用时只把持久化状态标记为 `model_unavailable`。PostgreSQL 路径的 `clarify`、`requirements_confirmation` 和 `human_review` 节点调用 `interrupt()`，澄清、需求确认和审核 API 均以 `Command(resume=...)` 在同一 thread 恢复；项目 checkpoint 仍负责输入轮次、幂等键、reviewer、角色、理由和应用层版本，避免模型自行宣布需求完整或 `approve`。SQLite 测试路径使用相同状态语义的显式恢复分支。
+`src/ai_presales_copilot/llm_agent.py` 的正式路径直接构建并执行 `StateGraph`；需求抽取使用实时模型的小字段组 JSON 输出，来源、类型和完整性由主机校验。模型/schema/引用失败不会进入规则解析 fallback，而是记录 `model_unavailable` 或继续停在需求门；方案节点模型不可用时同样只把持久化状态标记为 `model_unavailable`。PostgreSQL 路径的 `clarify`、`requirements_confirmation` 和 `human_review` 节点调用 `interrupt()`，澄清、需求确认和审核 API 均以 `Command(resume=...)` 在同一 thread 恢复；项目 checkpoint 仍负责输入轮次、幂等键、reviewer、角色、理由和应用层版本，避免模型自行宣布需求完整或 `approve`。SQLite 测试路径使用相同状态语义的显式恢复分支。
 
 面试时应展示节点边界、状态契约、审核恢复、工具权限和评测证据，而不是只展示“安装了 LangGraph”。
 

@@ -20,7 +20,6 @@ from .schemas import (
     IntakeBriefV2,
     RequirementAssessmentV2,
     RequirementConflictV2,
-    RequirementExtractionV2,
     RequirementFactV2,
     RequirementOverrideV2,
 )
@@ -166,213 +165,6 @@ def field_definition(path: str) -> FieldDefinition:
     )
 
 
-def conservative_extract_requirements(
-    raw_request: str,
-    *,
-    case_id: str,
-    turn_id: str = "turn-1",
-) -> RequirementExtractionV2:
-    """Extract only high-confidence lexical facts when the model is unusable.
-
-    This is a safety fallback for local model/schema incompatibilities.  It
-    never invents values: every emitted fact carries an exact substring from
-    the raw request, and anything not recognized remains null/empty so the
-    deterministic assessment can ask the customer.
-    """
-
-    text = raw_request.strip()
-    brief_data: dict[str, Any] = {
-        "schema_version": "2.0",
-        "case_id": case_id,
-        "raw_request": raw_request,
-    }
-    facts: list[RequirementFactV2] = []
-
-    def add_fact(
-        path: str,
-        value: Any,
-        quote: str | None,
-        *,
-        status: str = "stated",
-    ) -> None:
-        if value in (None, "", [], {}):
-            return
-        source_quote = (quote or "").strip()
-        if not source_quote or source_quote not in text:
-            return
-        definition = field_definition(path)
-        if isinstance(value, list):
-            value_text = "、".join(str(item) for item in value)
-        elif isinstance(value, bool):
-            value_text = "true" if value else "false"
-        else:
-            value_text = str(value)
-        facts.append(
-            RequirementFactV2(
-                field_path=path,
-                display_name=definition.display_name,
-                value_text=value_text,
-                status=status,
-                importance=definition.importance,
-                confidence=0.9 if status == "stated" else None,
-                source_turn_id=turn_id,
-                source_quote=source_quote,
-            )
-        )
-
-    def first_match(pattern: str, *, flags: int = 0) -> str | None:
-        match = re.search(pattern, text, flags)
-        return match.group(0).strip() if match else None
-
-    industry = first_match(r"制造业|工业制造|制造行业")
-    if industry:
-        brief_data["industry"] = industry
-        add_fact("industry", industry, industry)
-
-    goal = first_match(r"(?:减少|降低|提升|提高|改善)[^。；，,\n]{1,40}")
-    if goal:
-        brief_data["business_goal"] = goal
-        add_fact("business_goal", goal, goal)
-
-    use_case = first_match(r"[^。；，,\n]{0,80}(?:知识助手|知识问答|智能问答|知识库)")
-    if use_case:
-        use_case = use_case.lstrip("客户希望想要把将")
-        brief_data["use_case"] = use_case
-        add_fact("use_case", use_case, use_case)
-
-    user_matches = list(
-        dict.fromkeys(
-            re.findall(
-                r"维修工程师|现场工程师|一线员工|操作员|客服|销售|医生|护士|管理人员",
-                text,
-            )
-        )
-    )
-    if user_matches:
-        brief_data["target_users"] = user_matches
-        add_fact("target_users", user_matches, user_matches[0])
-
-    data_match = re.search(
-        r"((?:维修手册|历史工单|工单系统|产品文档|业务数据|知识库)"
-        r"\s*(?:和|及|与|、|，|,)\s*(?:维修手册|历史工单|工单系统|产品文档|业务数据|知识库))",
-        text,
-    )
-    data_values: list[str] = []
-    data_quote: str | None = None
-    if data_match:
-        data_quote = data_match.group(1).strip()
-        data_values = list(
-            dict.fromkeys(
-                item
-                for item in re.split(r"\s*(?:和|及|与|、|，|,)\s*", data_quote)
-                if item
-            )
-        )
-    else:
-        for keyword in ("维修手册", "历史工单", "工单系统", "产品文档", "业务数据"):
-            if keyword in text:
-                data_values.append(keyword)
-        if data_values:
-            data_quote = data_values[0]
-    if data_values:
-        brief_data["data_types"] = data_values
-        add_fact("data_types", data_values, data_quote)
-
-    deployment_matches = re.findall(
-        r"企业内网(?:私有化)?|内网私有化|公有云\s*API|公有云|私有化|本地部署|边缘部署|混合部署",
-        text,
-    )
-    deployment_values = list(dict.fromkeys(item.strip() for item in deployment_matches))
-    deployment_conflict = len(deployment_values) > 1
-    if deployment_values and not deployment_conflict:
-        brief_data["deployment"] = deployment_values[0]
-        add_fact("deployment", deployment_values[0], deployment_values[0])
-
-    residency_match = re.search(r"中国境内|境内驻留", text)
-    residency = residency_match.group(0) if residency_match else None
-    egress_matches = list(
-        dict.fromkeys(
-            match.strip()
-            for match in re.findall(r"(?:允许|可以|可)\s*(?:出域|外发)|(?:不能|不可|不允许|禁止|不得)\s*(?:出域|外发)", text)
-        )
-    )
-    egress_values = [
-        not bool(re.search(r"不能|不可|不允许|禁止|不得", item)) for item in egress_matches
-    ]
-    egress_conflict = len(set(egress_values)) > 1
-    governance: dict[str, Any] = {}
-    if residency and not residency.startswith("数据驻留"):
-        governance["residency"] = residency
-        add_fact("governance.residency", residency, residency)
-    if egress_matches and not egress_conflict:
-        governance["egress_allowed"] = egress_values[0]
-        add_fact("governance.egress_allowed", egress_values[0], egress_matches[0])
-    if "审计" in text:
-        audit_quote = first_match(r"[^。；，,\n]{0,20}审计[^。；，,\n]{0,20}") or "审计"
-        governance["audit_required"] = True
-        add_fact("governance.audit_required", True, audit_quote)
-    if governance:
-        brief_data["governance"] = governance
-
-    peak = re.search(r"峰值\s*并发\s*(?:为|是|:|：)?\s*(\d+)", text)
-    if peak:
-        brief_data.setdefault("capacity", {})["peak_concurrency"] = int(peak.group(1))
-        add_fact("capacity.peak_concurrency", int(peak.group(1)), peak.group(0))
-    latency = re.search(r"(?:完整答案|全答案|响应)\s*(?:不超过|不高于|目标)?\s*(\d+(?:\.\d+)?)\s*(秒|毫秒)", text)
-    if latency:
-        milliseconds = int(float(latency.group(1)) * (1000 if latency.group(2) == "秒" else 1))
-        brief_data.setdefault("capacity", {})["full_answer_target_ms"] = milliseconds
-        add_fact("capacity.latency_target", milliseconds, latency.group(0))
-
-    acceptance = re.search(r"验收(?:要求|标准)?\s*(?:为|是|:|：)?\s*([^。；\n]+)", text)
-    if acceptance:
-        criterion = acceptance.group(1).strip()
-        brief_data["acceptance_criteria"] = [criterion]
-        add_fact("acceptance_criteria", [criterion], acceptance.group(0))
-
-    integrations = [
-        item
-        for item in ("企业文档库", "统一身份认证", "审计平台", "内网文档库", "工单系统")
-        if item in text
-    ]
-    if integrations:
-        brief_data["integrations"] = list(dict.fromkeys(integrations))
-        add_fact("integrations", brief_data["integrations"], integrations[0])
-
-    conflict_items: list[RequirementConflictV2] = []
-    if deployment_conflict:
-        conflict_items.append(
-            RequirementConflictV2(
-                field_path="deployment",
-                description=f"客户同时提到多个部署边界：{'、'.join(deployment_values)}。",
-                source_turn_ids=[turn_id],
-                resolution_question="请确认最终部署方式。",
-            )
-        )
-    if egress_conflict:
-        conflict_items.append(
-            RequirementConflictV2(
-                field_path="governance.residency",
-                description="客户同时提出允许和禁止出域的要求。",
-                source_turn_ids=[turn_id],
-                resolution_question="请确认数据是否允许出域。",
-            )
-        )
-    if deployment_conflict:
-        brief_data["deployment"] = None
-    if egress_conflict:
-        governance["egress_allowed"] = None
-        brief_data["governance"] = governance
-
-    brief = IntakeBriefV2.model_validate(brief_data)
-    return RequirementExtractionV2(
-        schema_version="2.0",
-        brief=brief,
-        facts=facts,
-        conflicts=conflict_items,
-        assumptions=[],
-    )
-
 
 def validate_fact_sources(
     facts: Iterable[RequirementFactV2], turns: Iterable[InputTurnV2]
@@ -425,7 +217,7 @@ def detect_fact_conflicts(
     for path, candidates in grouped.items():
         distinct: dict[str, RequirementFactV2] = {}
         for fact in candidates:
-            normalized = re.sub(r"\s+", " ", fact.value_text.strip()).casefold()
+            normalized = _normalize_fact_value(path, fact.value_text)
             distinct.setdefault(normalized, fact)
         if len(distinct) < 2:
             continue
@@ -447,6 +239,53 @@ def detect_fact_conflicts(
             )
         )
     return conflicts
+
+
+def _normalize_fact_value(field_path: str, value: str) -> str:
+    """Normalize equivalent model phrasings before declaring a conflict."""
+
+    normalized = re.sub(r"\s+", "", value.strip()).casefold()
+    if field_path != "deployment":
+        return normalized
+    # Deployment is layered: "public-cloud deployment + public-cloud API" is
+    # one architecture, not two mutually exclusive deployment choices.
+    if "公有云" in normalized and "api" in normalized:
+        return "public_cloud_api"
+    if "公有云" in normalized:
+        return "public_cloud"
+    if "企业内网" in normalized or "内网" in normalized or "私有化" in normalized:
+        return "private_network"
+    if "边缘" in normalized:
+        return "edge"
+    if "本地" in normalized:
+        return "on_premises"
+    if "混合" in normalized:
+        return "hybrid"
+    return normalized
+
+
+def _deduplicate_conflicts(
+    conflicts: Iterable[RequirementConflictV2],
+) -> list[RequirementConflictV2]:
+    """Keep one actionable clarification per field while merging provenance."""
+
+    merged: dict[tuple[str, str], RequirementConflictV2] = {}
+    for conflict in conflicts:
+        key = (conflict.field_path, conflict.resolution_question)
+        previous = merged.get(key)
+        if previous is None:
+            merged[key] = conflict
+            continue
+        source_turn_ids = list(
+            dict.fromkeys([*previous.source_turn_ids, *conflict.source_turn_ids])
+        )
+        description = previous.description
+        if conflict.description not in description:
+            description = f"{description}；{conflict.description}"
+        merged[key] = previous.model_copy(
+            update={"description": description, "source_turn_ids": source_turn_ids}
+        )
+    return list(merged.values())
 
 
 def _brief_value(brief: IntakeBriefV2, path: str) -> Any:
@@ -498,7 +337,7 @@ def assess_requirements(
 
     fact_items = list(facts)
     indexed = fact_map(fact_items)
-    conflict_items = list(conflicts)
+    conflict_items = _deduplicate_conflicts(conflicts)
     known_conflict_paths = {item.field_path for item in conflict_items}
     conflict_items.extend(
         item
@@ -547,18 +386,36 @@ def apply_override(brief: IntakeBriefV2, override: RequirementOverrideV2) -> Int
     path = override.field_path
     data = brief.model_dump(mode="python")
     if path in {"target_users", "data_types", "integrations", "acceptance_criteria"}:
-        data[path] = [item.strip() for item in re.split(r"[,，;；\n]", value) if item.strip()]
+        data[path] = [item.strip() for item in re.split(r"[,，、;；\n]", value) if item.strip()]
     elif path == "governance.egress_allowed":
-        if value.lower() in {"true", "yes", "允许", "可以", "可出域"}:
+        normalized = value.lower().strip()
+        positive = normalized in {"true", "yes", "是", "允许", "可以", "允许出域", "可出域"}
+        positive = positive or (
+            normalized.startswith("是")
+            and not normalized.startswith("不是")
+        )
+        positive = positive or (
+            any(token in normalized for token in ("允许", "可以", "可出域"))
+            and not any(token in normalized for token in ("不允许", "不能", "不可", "禁止"))
+        )
+        if positive:
             data["governance"]["egress_allowed"] = True
-        elif value.lower() in {"false", "no", "不允许", "不能", "不可出域", "数据不能出域"}:
+        elif normalized in {"false", "no", "否", "不允许", "不能", "不可出域", "数据不能出域"} or any(
+            token in normalized for token in ("不允许", "不能", "不可", "禁止")
+        ):
             data["governance"]["egress_allowed"] = False
         else:
             raise ValueError("governance.egress_allowed must be boolean-like")
     elif path == "governance.audit_required":
-        if value.lower() in {"true", "yes", "需要", "要求", "必须"}:
+        normalized = value.lower().strip()
+        positive = normalized in {"true", "yes", "是", "需要", "要求", "必须"}
+        positive = positive or (normalized.startswith("是") and not normalized.startswith("不是")) or (
+            any(token in normalized for token in ("需要", "要求", "必须"))
+            and not any(token in normalized for token in ("不需要", "无需", "不要求"))
+        )
+        if positive:
             data["governance"]["audit_required"] = True
-        elif value.lower() in {"false", "no", "不需要", "无需", "不要求"}:
+        elif normalized in {"false", "no", "否", "不需要", "无需", "不要求"}:
             data["governance"]["audit_required"] = False
         else:
             raise ValueError("governance.audit_required must be boolean-like")
@@ -566,10 +423,15 @@ def apply_override(brief: IntakeBriefV2, override: RequirementOverrideV2) -> Int
         data["governance"][path.split(".", 1)[1]] = value
     elif path.startswith("capacity."):
         target = path.split(".", 1)[1]
-        try:
-            data["capacity"][target] = int(float(value))
-        except ValueError as exc:
-            raise ValueError(f"{path} must be numeric") from exc
+        if target == "latency_target":
+            target = "full_answer_target_ms"
+        numeric = re.search(r"\d+(?:\.\d+)?", value)
+        if numeric is None:
+            raise ValueError(f"{path} must be numeric")
+        number = float(numeric.group(0))
+        if target == "full_answer_target_ms" and "秒" in value and "毫秒" not in value:
+            number *= 1000
+        data["capacity"][target] = int(number)
     elif path in FIELD_BY_PATH:
         data[path] = value
     else:
@@ -603,15 +465,15 @@ def to_solution_brief(brief: IntakeBriefV2) -> CustomerBriefV2:
 def merge_fact_lists(
     existing: Iterable[RequirementFactV2], incoming: Iterable[RequirementFactV2]
 ) -> list[RequirementFactV2]:
-    """Keep one auditable fact per field without erasing prior evidence.
+    """Merge facts while retaining contradictory values for the conflict gate.
 
     A model extraction is allowed to omit a field on a later turn.  Its
     materialized ``missing`` row must therefore never overwrite an earlier
-    ``stated``/``confirmed`` fact.  Explicit confirmations still win over
-    older customer statements.
+    ``stated``/``confirmed`` fact.  Explicit confirmations still win in the
+    selected ``fact_map``, while a different stated value remains in the list
+    so the deterministic conflict gate can require an explicit resolution.
     """
 
-    merged: dict[str, RequirementFactV2] = {item.field_path: item for item in existing}
     priority = {
         "confirmed": 5,
         "stated": 4,
@@ -620,8 +482,46 @@ def merge_fact_lists(
         "inferred": 1,
         "missing": 0,
     }
+    merged = list(existing)
     for item in incoming:
-        previous = merged.get(item.field_path)
-        if previous is None or priority[item.status] >= priority[previous.status]:
-            merged[item.field_path] = item
-    return list(merged.values())
+        same_field = [
+            (index, previous)
+            for index, previous in enumerate(merged)
+            if previous.field_path == item.field_path
+        ]
+        substantive = item.status in {"stated", "confirmed"}
+        if substantive:
+            merged = [
+                previous
+                for previous in merged
+                if not (
+                    previous.field_path == item.field_path
+                    and previous.status in {"missing", "inferred", "ambiguous"}
+                )
+            ]
+            same_field = [
+                (index, previous)
+                for index, previous in enumerate(merged)
+                if previous.field_path == item.field_path
+            ]
+        if not same_field:
+            merged.append(item)
+            continue
+        equivalent = [
+            (index, previous)
+            for index, previous in same_field
+            if not previous.value_text
+            or not item.value_text
+            or _normalize_fact_value(item.field_path, previous.value_text)
+            == _normalize_fact_value(item.field_path, item.value_text)
+        ]
+        if equivalent:
+            index, previous = equivalent[-1]
+            if priority[item.status] >= priority[previous.status]:
+                merged[index] = item
+            continue
+        # Keep a different stated/confirmed value as historical evidence; it
+        # is intentionally surfaced by detect_fact_conflicts.
+        if priority[item.status] >= max(priority[previous.status] for _, previous in same_field):
+            merged.append(item)
+    return merged

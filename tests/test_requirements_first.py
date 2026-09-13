@@ -9,11 +9,15 @@ from ai_presales_copilot.api_v2 import LocalTokenAuth, create_fastapi_app
 from ai_presales_copilot.knowledge import KnowledgeBase
 from ai_presales_copilot.llama_client import GenerationResult, LlamaClientError
 from ai_presales_copilot.llm_agent import LocalModelWorkflow
-from ai_presales_copilot.model_schemas import requirements_extraction_schema, solution_draft_schema
+from ai_presales_copilot.model_schemas import (
+    REQUIREMENT_FACT_PATHS,
+    requirements_extraction_schema,
+    requirements_group_schema,
+    solution_draft_schema,
+)
 from ai_presales_copilot.persistence import CheckpointConflictError, CheckpointStore
 from ai_presales_copilot.requirements import (
     assess_requirements,
-    conservative_extract_requirements,
     merge_fact_lists,
     validate_fact_sources,
 )
@@ -43,13 +47,26 @@ class RequirementsFirstModel:
         return {"status": 200}
 
     def chat(self, messages, **kwargs):
-        properties = kwargs["response_schema"].get("properties", {})
+        properties = (kwargs.get("response_schema") or {}).get("properties", {})
         prompt = "\n".join(item.get("content", "") for item in messages)
-        if "brief" in properties:
+        if "customer_data=" in prompt:
             self.extraction_calls += 1
-            complete = self.complete or self.extraction_calls > 1
-            case_id = re.search(r"case_id=([A-Za-z0-9-]+)", prompt).group(1)
-            payload = self._extraction(case_id, complete, "turn-2" if complete and "turn-2" in prompt else "turn-1")
+            complete = self.complete or "补充" in prompt
+            source_turn_id = "turn-2" if complete and "补充" in prompt else "turn-1"
+            facts = {
+                item["field_path"]: item
+                for item in self._extraction("case-test", complete, source_turn_id)["facts"]
+            }
+            paths = list(properties)
+            payload = {
+                path: {
+                    "value": facts[path]["value_text"],
+                    "quote": facts[path]["source_quote"],
+                }
+                if path in facts
+                else {"value": "", "quote": ""}
+                for path in paths
+            }
         elif "queries" in properties:
             payload = {"queries": ["制造业 设备运维 企业内网 知识助手"]}
         elif "pass" in properties:
@@ -122,35 +139,14 @@ class RequirementsFirstModel:
 class RequirementsFirstHighRiskModel(RequirementsFirstModel):
     def chat(self, messages, **kwargs):
         result = super().chat(messages, **kwargs)
-        if "brief" not in kwargs["response_schema"].get("properties", {}):
+        if "governance.egress_allowed" not in result.text:
             return result
         payload = json.loads(result.text)
-        payload["brief"]["governance"]["egress_allowed"] = False
-        payload["brief"]["governance"]["audit_required"] = True
-        payload["facts"].extend(
-            [
-                {
-                    "field_path": "governance.egress_allowed",
-                    "display_name": "数据出域",
-                    "value_text": "不可出域",
-                    "status": "stated",
-                    "importance": "blocking",
-                    "confidence": 0.99,
-                    "source_turn_id": "turn-1",
-                    "source_quote": "数据不能出域",
-                },
-                {
-                    "field_path": "governance.audit_required",
-                    "display_name": "审计要求",
-                    "value_text": "需要审计",
-                    "status": "stated",
-                    "importance": "warning",
-                    "confidence": 0.99,
-                    "source_turn_id": "turn-1",
-                    "source_quote": "审计要求必须保留访问和审核日志",
-                },
-            ]
-        )
+        payload["governance.egress_allowed"] = {"value": "false", "quote": "数据不能出域"}
+        payload["governance.audit_required"] = {
+            "value": "true",
+            "quote": "审计要求必须保留访问和审核日志",
+        }
         return GenerationResult(
             json.dumps(payload, ensure_ascii=False),
             result.model,
@@ -195,7 +191,7 @@ def test_raw_input_stops_before_retrieval_when_blocking_fields_are_missing():
         store.close()
 
 
-def test_invalid_requirement_model_degrades_to_grounded_intake_only():
+def test_invalid_requirement_model_fails_closed_without_rule_fallback():
     store, workflow = _workflow(UnavailableRequirementsModel())
     try:
         state = workflow.start_input(
@@ -206,38 +202,19 @@ def test_invalid_requirement_model_degrades_to_grounded_intake_only():
             roles=["presales"],
             idempotency_key="run-1",
         )
-        assert state["status"] == "ready_for_confirmation"
-        assert state["extraction_mode"] == "deterministic_fallback"
+        assert state["status"] == "model_unavailable"
+        assert state["extraction_mode"] == "model"
         assert not {event.get("node") for event in store.events("requirements:fallback")} & {
             "retrieve",
             "draft",
             "finalize",
         }
-        assert any(
-            event["event_type"] == "requirements_extraction_fallback"
-            for event in store.events("requirements:fallback")
-        )
-        validate_fact_sources(
-            [RequirementFactV2.model_validate(item) for item in state["requirement_facts"]],
-            [InputTurnV2.model_validate(item) for item in state["input_turns"]],
-        )
+        assert not any("fallback" in event["event_type"] for event in store.events("requirements:fallback"))
     finally:
         store.close()
 
 
-def test_conservative_extractor_keeps_missing_values_nullable_and_grounded():
-    raw = "维修工程师使用维修手册，部署在企业内网，验收要求答案必须可引用。"
-    extraction = conservative_extract_requirements(raw, case_id="fallback")
-    assert extraction.brief.business_goal is None
-    assert extraction.brief.deployment == "企业内网"
-    assert all(
-        fact.source_quote and fact.source_quote in raw
-        for fact in extraction.facts
-        if fact.status in {"stated", "confirmed"}
-    )
-
-
-def test_fallback_reextracts_clarification_turns_with_their_own_sources():
+def test_model_unavailable_does_not_accept_clarification_or_synthesize_facts():
     store, workflow = _workflow(UnavailableRequirementsModel())
     try:
         state = workflow.start_input(
@@ -248,21 +225,17 @@ def test_fallback_reextracts_clarification_turns_with_their_own_sources():
             roles=["presales"],
             idempotency_key="run-1",
         )
-        assert state["status"] == "needs_clarification"
-        updated = workflow.add_clarification(
-            thread_id=state["thread_id"],
-            message="补充：业务目标是减少停机损失，目标用户是维修工程师，数据来自维修手册，部署在企业内网，数据驻留中国境内，验收要求答案必须可引用。",
-            expected_state_version=state["state_version"],
-            idempotency_key="clarify-1",
-            project_id="p",
-            user_id="u",
-            roles=["presales"],
-        )
-        assert updated["status"] == "ready_for_confirmation"
-        deployment = next(
-            item for item in updated["requirement_facts"] if item["field_path"] == "deployment"
-        )
-        assert deployment["source_turn_id"] == "turn-2"
+        assert state["status"] == "model_unavailable"
+        with pytest.raises(CheckpointConflictError, match="not accepting"):
+            workflow.add_clarification(
+                thread_id=state["thread_id"],
+                message="补充：业务目标是减少停机损失。",
+                expected_state_version=state["state_version"],
+                idempotency_key="clarify-1",
+                project_id="p",
+                user_id="u",
+                roles=["presales"],
+            )
     finally:
         store.close()
 
@@ -276,12 +249,64 @@ def test_customer_input_rejects_retired_language_alias():
 
 def test_model_facing_schemas_are_compact_and_pydantic_remains_the_gate():
     extraction = requirements_extraction_schema()
+    group = requirements_group_schema(("integrations", "budget"))
     draft = solution_draft_schema()
     serialized = json.dumps([extraction, draft], ensure_ascii=False)
     assert "$defs" not in serialized
     assert "$ref" not in serialized
-    assert extraction["properties"]["facts"]["maxItems"] <= 16
+    assert extraction["required"] == list(REQUIREMENT_FACT_PATHS)
+    for field_path in REQUIREMENT_FACT_PATHS:
+        assert extraction["properties"][field_path]["required"] == ["value", "quote"]
+    assert list(group["properties"]) == ["integrations", "budget"]
+    assert group["required"] == ["integrations", "budget"]
     assert draft["properties"]["claims"]["maxItems"] <= 16
+
+
+def test_invalid_model_attribution_is_isolated_and_valid_model_facts_are_kept():
+    content = "制造业客户补充：目标用户是维修工程师，部署在企业内网。"
+    turns = [InputTurnV2(turn_id="turn-2", content=content, created_at="now")]
+    payload = {
+        "facts": [
+            {
+                "field_path": "integrations",
+                "display_name": "集成系统",
+                "value_text": content,
+                "status": "stated",
+                "importance": "warning",
+                "source_turn_id": "turn-2",
+                "source_quote": content,
+            }
+        ]
+    }
+    LocalModelWorkflow._sanitize_model_facts(payload, turns)
+    assert payload["facts"][0]["status"] == "ambiguous"
+    assert payload["facts"][0]["value_text"] is None
+
+    valid_facts = [
+        RequirementFactV2(
+            field_path="target_users",
+            display_name="目标用户/业务流程",
+            value_text="维修工程师",
+            status="stated",
+            importance="blocking",
+            source_turn_id="turn-2",
+            source_quote="维修工程师",
+        ),
+        RequirementFactV2(
+            field_path="deployment",
+            display_name="部署方式",
+            value_text="企业内网",
+            status="stated",
+            importance="blocking",
+            source_turn_id="turn-2",
+            source_quote="部署在企业内网",
+        ),
+    ]
+    brief = LocalModelWorkflow._materialize_requirement_brief(
+        case_id="case-test", raw_request=content, facts=valid_facts
+    )
+    assert brief.target_users == ["维修工程师"]
+    assert brief.deployment == "企业内网"
 
 
 def test_fact_source_quote_must_be_present_in_the_turn():
@@ -369,7 +394,7 @@ def test_clarification_is_idempotent_and_stale_versions_are_rejected():
         )
         updated = workflow.add_clarification(
             thread_id=state["thread_id"],
-            message="制造业客户补充：部署在企业内网，数据驻留中国境内，目标用户是维修工程师，验收要求答案必须可引用，业务目标是减少停机损失。",
+                message="制造业客户补充：部署在企业内网，数据驻留中国境内，目标用户是维修工程师，数据来自维修手册，验收要求答案必须可引用，业务目标是减少停机损失。",
             expected_state_version=state["state_version"],
             idempotency_key="clarify-1",
             project_id="p",
@@ -490,7 +515,7 @@ def test_native_requirements_interrupts_resume_on_same_thread():
         assert state["status"] == "needs_clarification"
         state = workflow.add_clarification(
             thread_id=state["thread_id"],
-            message="制造业客户补充：部署在企业内网，数据驻留中国境内，目标用户是维修工程师，验收要求答案必须可引用，业务目标是减少停机损失。",
+                message="制造业客户补充：部署在企业内网，数据驻留中国境内，目标用户是维修工程师，数据来自维修手册，验收要求答案必须可引用，业务目标是减少停机损失。",
             expected_state_version=state["state_version"],
             idempotency_key="clarify-1",
             project_id="p",
@@ -512,6 +537,37 @@ def test_native_requirements_interrupts_resume_on_same_thread():
         events = store.events(state["thread_id"])
         assert any(item["event_type"] == "requirements_confirmed" for item in events)
         assert any(item.get("node") == "retrieve" for item in events)
+
+
+def test_native_ready_requirements_accept_supplemental_turn_before_confirmation():
+    with CheckpointStore(":memory:") as store:
+        workflow = LocalModelWorkflow(
+            RequirementsFirstModel(complete=True),
+            KnowledgeBase("data/knowledge"),
+            store,
+            graph_checkpointer=MemorySaver(),
+        )
+        state = workflow.start_input(
+            CustomerInputV2(raw_request=RAW_COMPLETE),
+            thread_id="requirements:native-ready-supplement",
+            project_id="p",
+            user_id="u",
+            roles=["presales"],
+            idempotency_key="run-1",
+        )
+        assert state["status"] == "ready_for_confirmation"
+        updated = workflow.add_clarification(
+            thread_id=state["thread_id"],
+            message=RAW_COMPLETE + "补充预算为 15-30 万元。",
+            expected_state_version=state["state_version"],
+            idempotency_key="supplement-1",
+            project_id="p",
+            user_id="u",
+            roles=["presales"],
+        )
+        assert updated["status"] == "ready_for_confirmation"
+        assert updated["clarification_turns"] == 1
+        assert len(updated["input_turns"]) == 2
 
 
 def test_native_requirements_review_rejects_on_same_thread():
@@ -600,12 +656,23 @@ def test_v2_api_exposes_the_same_requirements_first_state_machine():
             f"/v2/runs/{run_id}/clarifications",
             headers=clarify_headers,
             json={
-                "message": "制造业客户补充：部署在企业内网，数据驻留中国境内，目标用户是维修工程师，验收要求答案必须可引用，业务目标是减少停机损失。",
+                    "message": "制造业客户补充：部署在企业内网，数据驻留中国境内，目标用户是维修工程师，数据来自维修手册，验收要求答案必须可引用，业务目标是减少停机损失。",
                 "expected_state_version": state["state_version"],
             },
         )
         assert clarified.status_code == 200
         ready = clarified.json()
+        assert ready["status"] == "ready_for_confirmation"
+        supplemented = client.post(
+            f"/v2/runs/{run_id}/clarifications",
+            headers={**headers, "Idempotency-Key": "supplement-api-1"},
+            json={
+                "message": "补充信息：PoC 预算为 15-30 万元。",
+                "expected_state_version": ready["state_version"],
+            },
+        )
+        assert supplemented.status_code == 200
+        ready = supplemented.json()
         assert ready["status"] == "ready_for_confirmation"
         stale = client.post(
             f"/v2/runs/{run_id}/requirements/confirm",

@@ -23,8 +23,8 @@ PYTHONPATH=src python scripts/run_security_checks.py
 `security/redteam-cases.jsonl` 覆盖注入、无证据承诺、敏感数据和正常输入；最近一次 12/12 通过。Promptfoo 配置在 `security/promptfooconfig.yaml`，启动本地 API 后可用于扩展对抗回归：
 
 ```bash
-PRESALES_ALLOW_DEV_AUTH=true PRESALES_DEV_TOKEN=dev-token \
-  uv run python scripts/serve_agent.py --allow-dev-auth --port 8090 --model qwen3-8b-q4
+PRESALES_DEV_TOKEN=dev-token \
+  uv run --locked --extra runtime --extra demo python scripts/start_local_demo.py
 promptfoo redteam run -c security/promptfooconfig.yaml
 ```
 

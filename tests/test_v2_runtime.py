@@ -34,7 +34,26 @@ class FakeModel:
 
     def chat(self, _messages, **kwargs):
         properties = kwargs["response_schema"].get("properties", {})
-        if "queries" in properties:
+        prompt = "\n".join(item.get("content", "") for item in _messages)
+        if "customer_data=" in prompt:
+            facts = {
+                "business_goal": {"value": "减少停机损失", "quote": "减少停机损失"},
+                "use_case": {"value": "设备运维知识助手", "quote": "设备运维知识助手"},
+                "target_users": {"value": "维修工程师", "quote": "维修工程师"},
+                "data_types": {"value": "维修手册", "quote": "维修手册"},
+                "deployment": {"value": "企业内网", "quote": "企业内网"},
+                "governance.residency": {"value": "中国境内", "quote": "中国境内"},
+                "acceptance_criteria": {"value": "答案必须可引用", "quote": "答案必须可引用"},
+                "industry": {"value": "制造业", "quote": "制造业"},
+                "capacity.peak_concurrency": {"value": "", "quote": ""},
+                "capacity.latency_target": {"value": "", "quote": ""},
+                "governance.egress_allowed": {"value": "true", "quote": "数据可以出域"},
+            }
+            payload = {
+                path: facts.get(path, {"value": "", "quote": ""})
+                for path in properties
+            }
+        elif "queries" in properties:
             payload = {"queries": ["制造业 设备运维 本地部署"]}
         elif "pass" in properties:
             payload = {"pass": True, "issues": []}
